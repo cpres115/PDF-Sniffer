@@ -1,0 +1,4 @@
+# Windows launchers must keep CRLF line endings exactly as committed.
+*.bat -text
+*.sh text eol=lf
+vendor/** binary

@@ -1,0 +1,4 @@
+# Used only by run_pdf_sniffer.sh (Linux / macOS).  On Windows everything is bundled in vendor/.
+pymupdf==1.28.2
+numpy>=1.26
+openpyxl>=3.1

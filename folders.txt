@@ -1,0 +1,8 @@
+# List the folders to scan, one per line (sub-folders are included automatically).
+# Lines starting with # are ignored.  Examples:
+#
+# D:\Engineering\Drawings
+# \\fileserver\PLM\Released Documents
+#
+# If this list is empty the program asks you for a folder when it starts, and any folders
+# you drag onto "Run PDF Sniffer.bat" are scanned instead.
