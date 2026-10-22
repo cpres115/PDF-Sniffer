@@ -1,26 +1,27 @@
 """Drawing number / revision / REDLINE handling and the "out-of-date files on the server" check.
 
-In a version-controlled location the file name is <drawing number>[_<revision>][-<classification>],
-for example ``A10-000-5660_B-EAR.pdf``.  When a new revision is saved the old one should be removed,
-and when a REDLINE is shared (``TST-010-600_A Redline.pdf``) the plain file of that drawing is out of
-date.  This module reads those parts from each name, groups files by drawing number and reports
+In a version-controlled location the file name is <drawing number>_<revision>, optionally followed by tags,
+for example ``A10-000-5660_B-EAR.pdf`` or ``A10-000-1059_1 Blocked.pdf``.  When a new revision is saved the
+old one should be removed, and when a REDLINE is shared (``TST-010-600_A REDLINE.pdf``) the plain file of
+that drawing is out of date.  This module reads those parts from each name, groups files by drawing number
+and reports
 
 * older revisions that are still on the server,
 * plain files made out of date by a shared redline (and redlines that are themselves out of date),
 * extra copies of the same revision,
 * and a list of every redline on the server.
 
-How a name is read (case-insensitive):
-  1. A REDLINE word (redline, red line, markup, ... - see DEFAULT_REDLINE_WORDS) cuts the name there:
-     the word and anything after it are ignored, and the file is a redline.
-  2. Windows copy markers (" - Copy", " (1)") and trailing classification words (-EAR, -ITAR, -EAR99,
-     an ECCN such as -9A610) are ignored.
-  3. A revision keyword ("Rev B", "REV_02") or, failing that, a short last token after an underscore
-     (_B, _C, _02) is the revision; whatever precedes it is the drawing number.
-  4. Without a revision the whole remaining name is the drawing number (``TST-010-600.pdf``).
+How a name is read (case-insensitive) - built from the ~6,300 real file names of the library:
+  * Copy markers (" - Copy", " (1)"), the extension and trailing dots/spaces are ignored.
+  * The revision is the last short token after an underscore:  _B  _C  _AB  _2  _1.0  _1_0  _1-0  _A0  _B1.
+    Tag words that follow it (EAR, ITAR, REDLINE, Blocked, Removed, Obsolete, In Change SJS, PRELIM, ...)
+    are not revisions; the drawing number is everything before the underscore (it may itself contain
+    underscores:  A10-000-204_X_A  ->  number A10-000-204_X, revision A).
+  * Older names without an underscore are read too:  "T01-000-297 A",  "CBL-000-238-B",  "305722-RevNA".
+  * Without a revision the whole name is the drawing number ("CHM-000-016.pdf").
+  * Tags are collected for the reports: classification (EAR / ITAR / EAR99), REDLINE and status words.
 A different scheme can be given as a regular expression with the named groups ``number`` and ``rev``.
 """
-import os
 import re
 import time
 from collections import OrderedDict, defaultdict
@@ -36,33 +37,64 @@ STATUS_REDLINE_OLD = "Old redline - remove?"
 
 METHOD_KEYWORD = "Rev keyword"
 METHOD_UNDERSCORE = "_Revision after underscore"
+METHOD_LEGACY = "Older style (space / hyphen before revision)"
 METHOD_NONE = "No revision in name"
 METHOD_CUSTOM = "Custom pattern"
 
 # Words that mark a redline.  Spaces/hyphens inside a word are optional ("red line" = "redline" = "red-line"),
-# longer words also match when followed by more letters ("redlined", "redlines"), short ones only as a whole token.
-DEFAULT_REDLINE_WORDS = ("redline", "red line", "markup", "mark up", "marked up", "redln", "rdln", "mkup", "rl")
+# words of 5+ letters also match longer forms ("redlines", "redlined"), shorter ones only as a whole token.
+# The library only ever uses REDLINE; add more (markup, rl, ...) in settings.ini if your team does.
+DEFAULT_REDLINE_WORDS = ("redline", "red line")
 
 _SEP = r"[\s_.\-]"
 _COPY_SUFFIX = re.compile(r"(?:\s*[-_]?\s*copy(?:\s*\(\d+\))?|\s*\(\d+\))\s*$", re.IGNORECASE)
+
+# ---- tags found in the name after the drawing number: (label, regex).  Status words are the ones seen
+# in the library; "RETIRED" ones mean the file has already been marked as not to be used.
+CLASSIFICATION_TAGS = (("ITAR", r"itar"), ("EAR99", r"ear99"), ("EAR", r"ear"))
+STATUS_TAGS = (
+    ("Blocked", r"block(?:ed)?"),
+    ("Removed", r"removed"),
+    ("Obsolete", r"obsolete[d]?"),
+    ("Do Not Use", r"do" + _SEP + r"*not" + _SEP + r"*use"),
+    ("In Change", r"in" + _SEP + r"*(?:change|eco)(?:" + _SEP + r"*process)?"),
+    ("Prelim", r"prelim(?:inary)?"),
+    ("Deviation", r"deviation"),
+    ("Internal Use Only", r"internal" + _SEP + r"*use" + _SEP + r"*only"),
+    ("Hand Drawn", r"hand" + _SEP + r"*drawn"),
+)
+RETIRED_TAGS = {"Blocked", "Removed", "Obsolete", "Do Not Use"}
+_TAG_PATTERNS = [(label, re.compile(r"(?<![A-Za-z])(?:" + rx + r")(?![A-Za-z])", re.IGNORECASE))
+                 for label, rx in CLASSIFICATION_TAGS + STATUS_TAGS]
+# classification words / an ECCN at the end of a drawing number:  A10-000-5630-X-EAR_B  ->  A10-000-5630-X
 _CLASSIFICATION_TAIL = re.compile(
     r"(?:[\s_.\-]+(?:ITAR|EAR99|EAR|[0-9][A-E][0-9]{3}(?:\.[A-Za-z0-9]+)*))+$", re.IGNORECASE)
-# "Rev B", "REV_02", "Revision-C"; without a separator only a short token is accepted so that
+# tag phrases (and "(anything)") at the very end of a name that has no revision
+_TRAILING_TAG = re.compile(
+    r"[\s_.\-]*(?:\([^)]*\)|(?<![A-Za-z])(?:" + "|".join(rx for _, rx in CLASSIFICATION_TAGS + STATUS_TAGS)
+    + r")(?![A-Za-z]))[\s_.\-]*$", re.IGNORECASE)
+
+# A revision token: 7  12  1.0  1_0  1-0  |  A0  B1  R6  |  A  AB.   Not followed by more letters/digits.
+_REV_TOKEN = re.compile(r"(?P<rev>\d{1,2}(?:[._\-]\d{1,2})?|[A-Za-z]\d{1,2}|[A-Za-z]{1,2})(?![A-Za-z0-9])")
+_NOT_REV = {"IN", "ON", "NO", "OF", "TO", "DO", "AT", "BY", "OR", "AN", "AS", "IS", "IT", "US", "UP"}
+# "Rev B", "REV_02", "Revision-C", "RevNA"; without a separator only a short token is accepted so that
 # words such as "Review" or "Revised" are not mistaken for a revision.
 _REV_KEYWORD = re.compile(
     r"(?<![A-Za-z])REV(?:ISION)?(?:[\s_.\-]+([A-Z]{1,3}|\d{1,3})|([A-Z]{1,2}|\d{1,3}))(?![A-Za-z0-9])",
     re.IGNORECASE)
-# 12345-678_B   or   12345-678_B-whatever   (the last underscore that is followed by a short token)
-_UNDERSCORE_REV = re.compile(r"^(?P<number>.+)_(?P<rev>[A-Za-z]{1,2}|\d{1,3})(?:[\s\-_].*)?$")
+# older names: "T01-000-297 A", "C10256 R6", "A10-000-4188 K-S 1.0"   and   "CBL-000-238-B", "HDW-000-021-X-B"
+_SPACE_REV = re.compile(r"^(?P<number>.*\d.*?)\s+(?P<rev>[A-Za-z]{1,2}|[A-Za-z]\d{1,2}|\d{1,2}(?:\.\d{1,2})?)$")
+_HYPHEN_REV = re.compile(r"^(?P<number>.*\d.*?)-(?P<rev>[A-WYZa-wyz]{1,2})$")  # "-X" is a variant of the number, not a revision
 
 
 @dataclass
 class NameInfo:
     number: str    # drawing number as written, e.g. "A10-000-5660"
-    rev: str       # revision as written, upper-cased, e.g. "B" or "02"; "" when the name has none
+    rev: str       # revision as written, upper-cased, e.g. "B", "02" or "1.0"; "" when the name has none
     key: str       # normalised drawing number used for grouping
     method: str
-    redline: str = ""  # the REDLINE word found in the name ("" = not a redline)
+    redline: str = ""                       # the REDLINE word found in the name ("" = not a redline)
+    tags: tuple = ()                        # labels found in the name: EAR, ITAR, Redline, Blocked, In Change, ...
 
 
 def compile_pattern(text):
@@ -94,10 +126,21 @@ def compile_redline_words(words=DEFAULT_REDLINE_WORDS):
 _DEFAULT_REDLINE_RE = compile_redline_words()
 
 
+def _basename(path):
+    """File name of a Windows or POSIX path (works on any OS)."""
+    return re.split(r"[\\/]", path)[-1]
+
+
+def _dirname(path):
+    parts = re.split(r"[\\/]", path)
+    return path[:len(path) - len(parts[-1]) - 1] if len(parts) > 1 else ""
+
+
 def _stem(filename):
-    stem = os.path.basename(filename)
+    stem = _basename(filename)
     if stem.lower().endswith(".pdf"):
         stem = stem[:-4]
+    stem = stem.rstrip(" .")            # "A10-000-3317_A..pdf"  and  "CBL-000-090_B .PDF"
     return _COPY_SUFFIX.sub("", stem).strip()
 
 
@@ -107,55 +150,144 @@ def find_redline(filename, redline_re=_DEFAULT_REDLINE_RE):
     return m.group(0) if m else ""
 
 
+def _find_tags(text, redline_re):
+    found = []
+    if redline_re is not None:
+        m = redline_re.search(text)
+        if m:
+            found.append((m.start(), "Redline"))
+    for label, rx in _TAG_PATTERNS:
+        m = rx.search(text)
+        if m:
+            found.append((m.start(), label))
+    return tuple(label for _, label in sorted(found))
+
+
 def _key(number):
     return re.sub(_SEP + "+", "", number).upper()
+
+
+def _clean_number(text):
+    text = text.strip(" _-.([")
+    while True:
+        new = _CLASSIFICATION_TAIL.sub("", text).strip(" _-.([")
+        if new == text:
+            return re.sub(r"\s+", " ", text)
+        text = new
+
+
+def _without_tail_tags(stem, redline_re):
+    """The name without trailing tag phrases (EAR, Blocked, "(anything)") and without the REDLINE word and
+    whatever follows it."""
+    core = stem
+    while True:
+        shorter = _TRAILING_TAG.sub("", core)
+        if redline_re is not None:
+            m = redline_re.search(shorter)
+            if m:
+                shorter = shorter[:m.start()]
+        shorter = shorter.strip(" _-.")
+        if shorter == core:
+            return core
+        core = shorter
+
+
+def _underscore_revision(stem):
+    """(position of the underscore, revision) of the revision token after an underscore, or None.
+
+    Every underscore followed by a short token is a candidate; tag words (In, Blocked, SJS, ...) are
+    not revision-shaped, and a two-letter token (could be initials) only wins if no simpler candidate
+    exists.  Among the rest the rightmost one wins:  A10-000-204_X_A_ITAR Blocked -> A.
+    """
+    candidates, consumed = [], -1
+    for m in re.finditer(r"_+\s*", stem):
+        if m.start() < consumed:       # the underscore in "1_0" belongs to the revision token before it
+            continue
+        t = _REV_TOKEN.match(stem, m.end())
+        if t and t.group("rev").upper() not in _NOT_REV:
+            candidates.append((m.start(), t.group("rev")))
+            consumed = t.end()
+    simple = [c for c in candidates if not re.fullmatch(r"[A-Za-z]{2}", c[1])]
+    pool = simple or candidates
+    return pool[-1] if pool else None
 
 
 def parse_name(filename, pattern=None, redline_re=_DEFAULT_REDLINE_RE):
     """NameInfo for a file name, or None when it contains no drawing number."""
     stem = _stem(filename)
-    redline = ""
+    tags = _find_tags(stem, redline_re)
     m = redline_re.search(stem) if redline_re is not None else None
-    if m:
-        redline, stem = m.group(0), stem[:m.start()]
-    stem = stem.strip(" _-.")
-    stem = _CLASSIFICATION_TAIL.sub("", stem).strip(" _-.")
+    redline = m.group(0) if m else ""
 
     def info(number, rev, method):
-        number = _CLASSIFICATION_TAIL.sub("", number.strip(" _-.([")).strip(" _-.")
+        number = _clean_number(number)
         if not re.search(r"\d", number):
             return None
-        return NameInfo(number, rev.upper(), _key(number), method, redline)
+        rev = "" if rev.upper() in ("NA", "N/A") else rev     # "305722-RevNA" = not applicable
+        return NameInfo(number, rev.upper(), _key(number), method, redline, tags)
 
     if pattern is not None:
-        m = pattern.search(stem)
+        m = pattern.search(_without_tail_tags(stem, redline_re))
         return info(m.group("number"), m.group("rev").strip(), METHOD_CUSTOM) if m and m.group("number") and m.group("rev") else None
-    m = _REV_KEYWORD.search(stem)
+
+    m = _REV_KEYWORD.search(stem)      # "Rev B", "REV_02", "-RevNA" win over everything else
     if m:
-        found = info(stem[:m.start()], m.group(1) or m.group(2), METHOD_KEYWORD)
-        if found:
-            return found
-    m = _UNDERSCORE_REV.match(stem)
-    if m:
-        found = info(m.group("number"), m.group("rev"), METHOD_UNDERSCORE)
-        if found:
-            return found
-    return info(stem, "", METHOD_NONE)
+        result = info(stem[:m.start()], m.group(1) or m.group(2), METHOD_KEYWORD)
+        if result:
+            return result
+    found = _underscore_revision(stem)
+    if found:
+        result = info(stem[:found[0]], found[1], METHOD_UNDERSCORE)
+        if result:
+            return result
+
+    # no underscore revision: drop tag phrases from the end, then try the older styles
+    core = _clean_number(_without_tail_tags(stem, redline_re))
+    for rx in (_SPACE_REV, _HYPHEN_REV):
+        m = rx.match(core)
+        if m and m.group("rev").upper() not in _NOT_REV:
+            result = info(m.group("number"), m.group("rev"), METHOD_LEGACY)
+            if result:
+                return result
+    return info(core, "", METHOD_NONE)
 
 
 # ------------------------------------------------------------------------------ ordering
 def _norm_rev(rev):
-    """Revisions that mean the same compare equal: '02' == '2', 'b' == 'B'; '' = no revision."""
-    return (rev.lstrip("0") or "0") if rev.isdigit() else rev.upper()
+    """Revisions that mean the same compare equal: '02' == '2', '1.0' == '1', 'A0' == 'A', 'b' == 'B'.
+
+    '' = no revision.  Numbers become dotted ints ('1.1'); letters stay letters (+ minor digit if non-zero).
+    """
+    rev = rev.strip().upper()
+    if not rev:
+        return ""
+    if rev[0].isdigit():
+        parts = [int(p) for p in re.split(r"[._\-]", rev)]
+        while len(parts) > 1 and parts[-1] == 0:
+            parts.pop()
+        return ".".join(str(p) for p in parts)
+    letters, digits = re.fullmatch(r"([A-Z]+)(\d*)", rev).groups()
+    return letters + (str(int(digits)) if digits and int(digits) else "")
 
 
-def _rank(rev):
-    """Sort key within one kind of revision: numbers numerically, letters A < B < ... < Z < AA < AB."""
-    return (int(rev),) if rev.isdigit() else (len(rev), rev)
+def _rank(norm):
+    """Sort key within one kind of revision: numbers numerically (1 < 1.1 < 2), letters A < B < ... < Z < AA."""
+    if norm[0].isdigit():
+        return tuple(int(p) for p in norm.split("."))
+    letters, digits = re.fullmatch(r"([A-Z]+)(\d*)", norm).groups()
+    return (len(letters), letters, int(digits or 0))
 
 
-def _kind(rev):
-    return "number" if rev.isdigit() else "letter"
+def _kind(norm):
+    return "number" if norm[0].isdigit() else "letter"
+
+
+_CLASS_ORDER = {"": 0, "EAR99": 1, "EAR": 2, "ITAR": 3}
+
+
+def _classification(info):
+    """The strictest classification written in the name: ITAR > EAR > EAR99 > '' (no tag)."""
+    return max((t for t in info.tags if t in _CLASS_ORDER), key=_CLASS_ORDER.get, default="")
 
 
 def _natural(text):
@@ -169,12 +301,12 @@ class RevisionReport:
     redlines: list = field(default_factory=list)   # every redline on the server
 
 
-REVISION_COLUMNS = ["Drawing Number", "Revision", "Status", "File Name", "Folder", "Last Modified",
-                    "Size (KB)", "Revisions On Server", "Export Control Group", "Notes",
+REVISION_COLUMNS = ["Drawing Number", "Revision", "Status", "File Name", "Name Tags", "Folder",
+                    "Last Modified", "Size (KB)", "Revisions On Server", "Export Control Group", "Notes",
                     "Name Read By", "Full Path"]
-REDLINE_COLUMNS = ["Drawing Number", "Revision", "Redline File", "Folder", "Last Modified", "Size (KB)",
-                   "Redline Word", "Status", "Plain File(s) It Makes Out Of Date", "Export Control Group",
-                   "Full Path"]
+REDLINE_COLUMNS = ["Drawing Number", "Revision", "Redline File", "Name Tags", "Folder", "Last Modified",
+                   "Size (KB)", "Redline Word", "Status", "Plain File(s) It Makes Out Of Date",
+                   "Export Control Group", "Full Path"]
 
 
 def _when(mtime):
@@ -201,7 +333,8 @@ def analyze(files, pattern=None, redline_re=_DEFAULT_REDLINE_RE):
 
     stats = {"files": len(files), "unparsed": unparsed, "no_revision": no_revision,
              "multi_revision": 0, "older": 0, "extra_copies": 0, "unordered": 0,
-             "outdated_by_redline": 0, "old_redlines": 0, "redlines": sum(1 for f in files if f["redline"])}
+             "outdated_by_redline": 0, "old_redlines": 0, "tag_conflicts": 0,
+             "redlines": sum(1 for f in files if f["redline"])}
     rows = []
     status_of = {}                 # path -> status
     outdates = defaultdict(list)   # redline path -> plain file names it makes out of date
@@ -257,10 +390,10 @@ def analyze(files, pattern=None, redline_re=_DEFAULT_REDLINE_RE):
                         if covering:
                             status = STATUS_OUTDATED
                             notes_of[f["path"]] = "redline on the server: " + ", ".join(
-                                os.path.basename(rf["path"]) for rf in covering)
+                                _basename(rf["path"]) for rf in covering)
                             stats["outdated_by_redline"] += 1
                             for rf in covering:
-                                outdates[rf["path"]].append(os.path.basename(f["path"]))
+                                outdates[rf["path"]].append(_basename(f["path"]))
                         else:
                             status = STATUS_NEWEST
                     status_of[f["path"]] = status
@@ -269,6 +402,20 @@ def analyze(files, pattern=None, redline_re=_DEFAULT_REDLINE_RE):
                     for f, _ in items:
                         prior = notes_of.get(f["path"])
                         notes_of[f["path"]] = (prior + "; " if prior else "") + f"{len(items)} copies of this file"
+        classes = {_classification(info) for _, info in members}
+        conflict = ""
+        if len(classes) > 1:   # e.g. one copy tagged -ITAR in the ITAR library, another untagged elsewhere
+            stats["tag_conflicts"] += 1
+            conflict = "copies disagree on classification in the file name: " + " vs ".join(
+                (c or "no tag") for c in sorted(classes, key=_CLASS_ORDER.get, reverse=True))
+        for f, info in members:
+            extra = [conflict] if conflict else []
+            retired = [t for t in info.tags if t in RETIRED_TAGS]
+            if retired:
+                extra.append("already marked " + "/".join(retired))
+            if extra:
+                prior = notes_of.get(f["path"])
+                notes_of[f["path"]] = "; ".join(([prior] if prior else []) + extra)
         rank_of = {"": -1, **{r: i for i, r in enumerate(order)}}
         revs_text = ", ".join((["(none)"] if ("", False) in buckets or ("", True) in buckets else [])
                               + [shown[r] for r in order])
@@ -281,8 +428,9 @@ def analyze(files, pattern=None, redline_re=_DEFAULT_REDLINE_RE):
         for f, info in sorted(members, key=sort_key):
             rows.append(OrderedDict([
                 ("Drawing Number", info.number), ("Revision", info.rev or "(none)"),
-                ("Status", status_of[f["path"]]), ("File Name", os.path.basename(f["path"])),
-                ("Folder", os.path.dirname(f["path"])), ("Last Modified", _when(f.get("mtime"))),
+                ("Status", status_of[f["path"]]), ("File Name", _basename(f["path"])),
+                ("Name Tags", ", ".join(info.tags)), ("Folder", _dirname(f["path"])),
+                ("Last Modified", _when(f.get("mtime"))),
                 ("Size (KB)", round(f.get("size", 0) / 1024, 1)), ("Revisions On Server", revs_text),
                 ("Export Control Group", f.get("category", "")), ("Notes", notes_of.get(f["path"], "")),
                 ("Name Read By", info.method), ("Full Path", f["path"]),
@@ -297,7 +445,8 @@ def analyze(files, pattern=None, redline_re=_DEFAULT_REDLINE_RE):
             status = status_of.get(f["path"], "Only file of this drawing on the server")
         redlines.append(OrderedDict([
             ("Drawing Number", f["drawing_number"]), ("Revision", (info.rev or "(none)") if info else ""),
-            ("Redline File", os.path.basename(f["path"])), ("Folder", os.path.dirname(f["path"])),
+            ("Redline File", _basename(f["path"])), ("Name Tags", ", ".join(info.tags) if info else ""),
+            ("Folder", _dirname(f["path"])),
             ("Last Modified", _when(f.get("mtime"))), ("Size (KB)", round(f.get("size", 0) / 1024, 1)),
             ("Redline Word", f["redline"]), ("Status", status),
             ("Plain File(s) It Makes Out Of Date", "; ".join(sorted(set(outdates.get(f["path"], []))))),

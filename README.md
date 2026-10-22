@@ -104,14 +104,28 @@ Each row also shows the folder, last-modified date, all revisions found and (in 
 group, so you can see at once whether a stale file is an ITAR/EAR drawing. Letter revisions order `A < B < ... < Z < AA`,
 numeric ones numerically (`9 < 10`). **Nothing is deleted or changed; it only reports.**
 
-**How a name is read**
+**How a name is read** (worked out from the ~6,300 real file names of the library)
 
-* A REDLINE word marks a redline and cuts the name there (the word and anything after it are ignored). Built in:
-  `redline`, `red line` / `red-line`, `markup`, `mark up`, `marked up`, `redln`, `rdln`, `mkup`, `rl`, in any case, also as
-  `redlined`, `redlines`, `Redline 2`. Add your own words in `settings.ini` (`redline_words`) or with `--redline-word`.
-* A trailing `-EAR`, `-ITAR`, `-EAR99` or ECCN (`-9A610`) and Windows copy markers (`- Copy`, `(1)`) are ignored.
-* The revision is the short token after the last underscore (`_B`, `_C`, `_02`) or follows a keyword (`Rev B`, `REV_02`).
-* A name with no revision is simply the drawing number (`TST-010-600.pdf`) and counts as older than any revision.
+* The **revision** is the last short token after an underscore: `_B`, `_AB`, `_2`, `_1.0`, `_1_0`, `_1-0`, `_A0`, `_B1`. Everything
+  before that underscore is the drawing number, which may itself contain underscores or a variant part
+  (`A10-000-204_X_A`, `A10-000-1060-X_3`, `A10-000-4235 K-S_1.0` are three different drawing numbers' revisions).
+  `1`, `1.0` and `1_0` mean the same revision, so do `A` and `A0`; `1 < 1.1 < 2`, `9 < 10`, `A < A1 < B < ... < Z < AA`.
+* **Tags** may follow the revision and are never mistaken for it: classification (`-EAR`, `_ITAR`, `-EAR99`, an ECCN),
+  REDLINE, and status words such as `Blocked`, `Block`, `Removed`, `Obsolete`, `In Change` (with initials like `SJS`),
+  `PRELIM`, `Deviation`, `Internal Use Only`, `(upon request)`, `(129582)`. They are shown in the **Name Tags** column; a file
+  already marked Blocked / Removed / Obsolete gets the note *already marked ...* so you can see it was dealt with.
+* **REDLINE** (any case: `Redline`, `REDLINE`, `redline`; also `Red Line`, `redlined`, `REDLINES`) marks a redline. Colour
+  words such as `RED` or `YELLOW` are not redlines. Add more words (`markup`, `rl`, ...) in `settings.ini`
+  (`redline_words`) or with `--redline-word`.
+* Older names without an underscore are read too: `T01-000-297 A`, `CBL-000-238-B`, `HDW-000-021-X-B`,
+  `A10-000-4188 K-S 1.0 redline`, `C10256 R6`, `307837-Rev1`. A trailing `-X` is part of the number, not a revision;
+  `-RevNA` means no revision.
+* A name with no revision is simply the drawing number (`CHM-000-016.pdf`, `DOC-000-330 PRELIM.pdf`) and counts as older
+  than any revision. Extensions in any case (`.PDF`), `..pdf`, trailing spaces and Windows copy markers (`- Copy`, `(1)`)
+  are ignored.
+* **Copies that disagree on classification:** if one copy of a drawing is tagged `-ITAR`/`-EAR` and another is not (for
+  example `X_A.pdf` in the normal library and `X_A-ITAR.pdf` in the ITAR library), every file of that drawing gets the note
+  *copies disagree on classification in the file name: ITAR vs no tag*, and the drawing is counted in the summary.
 
 The **Drawing Number** and **Revision** columns of the *All Files* sheet show how every name was read, and the **Name Read
 By** column of the revision sheet how it was recognised. To use a different scheme, give a regular expression with the

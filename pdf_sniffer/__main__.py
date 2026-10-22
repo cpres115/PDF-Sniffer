@@ -76,7 +76,7 @@ def build_parser():
     p.add_argument("--skip-folder", metavar="NAME", action="append", default=[],
                    help='extra folder name to skip everywhere (repeatable; "- Engineering Release" is always skipped)')
     p.add_argument("--redline-word", metavar="WORD", action="append", default=[],
-                   help="extra word that marks a redline in a file name (repeatable; default: REDLINE and similar)")
+                   help="extra word that marks a redline in a file name (repeatable; built in: REDLINE / red line)")
     p.add_argument("--advisory-phrase", metavar="TEXT", action="append", default=[],
                    help="extra heading of an explanatory logo table to ignore (repeatable; default: 'General Symbol Advisory')")
     p.add_argument("--selftest", action="store_true", help="verify the installation on built-in sample PDFs")

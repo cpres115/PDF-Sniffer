@@ -63,6 +63,7 @@ def revision_summary_lines(stats):
             f"  Plain files made out of date by a REDLINE:           {stats['outdated_by_redline']}",
             f"  Old redlines (a newer revision exists):              {stats['old_redlines']}",
             f"  Extra copies of the same revision:                   {stats['extra_copies']}",
+            f"  Drawings whose copies disagree on ITAR/EAR tagging:  {stats['tag_conflicts']}",
             f"  Drawings whose revisions cannot be ordered:          {stats['unordered']}",
             f"  REDLINE files on the server (see Redlines list):     {stats['redlines']}",
             f"  File names without a revision:                       {stats['no_revision']} of {stats['files']}",
@@ -113,7 +114,7 @@ REV_FILLS = {revisions.STATUS_NEWEST: "E2F0D9", revisions.STATUS_REDLINE_CURRENT
 SHEET_WIDTHS = {"Drawing Number": 20, "Revision": 9, "Status": 34, "File Name": 40, "Folder": 44,
                 "Last Modified": 17, "Size (KB)": 10, "Revisions On Server": 20, "Export Control Group": 34,
                 "Notes": 44, "Name Read By": 28, "Full Path": 60, "Redline File": 40, "Redline Word": 14,
-                "Plain File(s) It Makes Out Of Date": 44}
+                "Plain File(s) It Makes Out Of Date": 44, "Name Tags": 20}
 
 
 def write_rows_csv(rows, columns, path):
@@ -169,6 +170,7 @@ def _add_revision_summary(ws, stats):
                        ("Plain files made out of date by a REDLINE", "outdated_by_redline"),
                        ("Old redlines (a newer revision exists)", "old_redlines"),
                        ("Extra copies of the same revision", "extra_copies"),
+                       ("Drawings whose copies disagree on ITAR/EAR tagging", "tag_conflicts"),
                        ("Drawings whose revisions cannot be ordered", "unordered"),
                        ("REDLINE files on the server (sheet: Redlines)", "redlines"),
                        ("File names without a revision", "no_revision"),
