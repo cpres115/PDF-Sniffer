@@ -24,6 +24,11 @@ pymupdf.TOOLS.mupdf_display_errors(False)
 pymupdf.TOOLS.mupdf_display_warnings(False)
 
 _FOOTER_MENTION = re.compile(r"\b(?:ITAR|EAR|ECCN)\b")
+# Red export-control note ("WARNING - ... restricted by the Export Administration Regulations ("EAR") or the
+# International Traffic in Arms Regulations ("ITAR") ..."): the abbreviations are matched in capitals only so that
+# an ordinary word such as "ear" does not count.
+_NOTE_EAR = re.compile(r"\bEAR\b|(?i:export\s+administration\s+regulations)")
+_NOTE_ITAR = re.compile(r"\bITAR\b|(?i:international\s+traffic\s+in\s+arms)")
 _BIG_FILE = 400 * 1024 * 1024
 
 
@@ -271,13 +276,39 @@ def _save_evidence(page, logo, eccn_rect, cfg, path, page_no, tag=""):
         return "", ()
 
 
+def find_red_notes(page, page_no):
+    """A red export-control note on the page, or None.
+
+    Older documents have no round logo but carry a red warning that names the EAR and/or the ITAR (or spells
+    out "Export Administration Regulations" / "International Traffic in Arms Regulations").  Only red text counts,
+    so ordinary black text that merely mentions the regulations does not.
+    Returns {"page", "regimes": ["EAR", "ITAR"], "text"} (text-layer pages only).
+    """
+    plain = page.get_text()
+    if not (_NOTE_EAR.search(plain) or _NOTE_ITAR.search(plain)):      # cheap pre-filter
+        return None
+    parts = []
+    for block in page.get_text("dict")["blocks"]:
+        for line in block.get("lines", ()):
+            for span in line["spans"]:
+                c = span["color"]
+                if imaging.is_red_rgb((c >> 16) & 255, (c >> 8) & 255, c & 255):
+                    parts.append(span["text"])
+    text = re.sub(r"\s+", " ", " ".join(parts)).strip()
+    regimes = [name for name, rx in (("EAR", _NOTE_EAR), ("ITAR", _NOTE_ITAR)) if rx.search(text)]
+    return {"page": page_no, "regimes": regimes, "text": text[:160]} if regimes else None
+
+
 def scan_page(page, page_no, cfg, path):
-    """-> (hits, suspects, notes, infos) for one page."""
-    hits, suspects, notes, infos = [], [], [], []
+    """-> (hits, suspects, notes, infos, mentions) for one page.
+
+    `mentions` lists (page, word) where footer text names ITAR/EAR/ECCN although no logo was found; the caller
+    decides whether that needs a review (it does not when the text is a red export-control note)."""
+    hits, suspects, notes, infos, mentions = [], [], [], [], []
     try:
         candidates = find_candidate_rings(page, cfg)
     except imaging.TooMuchInk as exc:
-        return hits, suspects, [f"page {page_no}: {exc}; logo search skipped - verify manually"], infos
+        return hits, suspects, [f"page {page_no}: {exc}; logo search skipped - verify manually"], infos, mentions
 
     regions = None
 
@@ -318,8 +349,8 @@ def scan_page(page, page_no, cfg, path):
                             for reg in advisory())]
         word = _FOOTER_MENTION.search(" ".join(words))
         if word:
-            notes.append(f"page {page_no}: footer text mentions '{word.group(0)}' but no logo was found - verify")
-    return hits, suspects, notes, infos
+            mentions.append((page_no, word.group(0)))
+    return hits, suspects, notes, infos, mentions
 
 
 def scan_file(path, cfg=None, root=""):
@@ -336,7 +367,7 @@ def scan_file(path, cfg=None, root=""):
         res.seconds = round(time.time() - t0, 2)
         return res
 
-    hits, suspects, notes, infos, page_errors = [], [], [], [], 0
+    hits, suspects, notes, infos, mentions, page_errors = [], [], [], [], [], 0
     try:
         if doc.needs_pass and not doc.authenticate(""):
             raise RuntimeError("password protected")
@@ -347,11 +378,12 @@ def scan_file(path, cfg=None, root=""):
                 notes.append(f"time limit reached after {i} of {res.pages} pages")
                 break
             try:
-                h, s, n, f = scan_page(doc.load_page(i), i + 1, cfg, str(path))
+                h, s, n, f, m = scan_page(doc.load_page(i), i + 1, cfg, str(path))
                 hits += h
                 suspects += s
                 notes += n
                 infos += f
+                mentions += m
             except Exception as exc:
                 page_errors += 1
                 notes.append(f"page {i + 1} could not be analysed: {exc}")
@@ -360,6 +392,26 @@ def scan_file(path, cfg=None, root=""):
             raise RuntimeError("no pages could be scanned")
         if page_errors == res.pages_scanned and res.pages_scanned:
             raise RuntimeError("every page failed to render; the file may be damaged")
+
+        # Old documents without a round logo: look for the red export-control warning instead.  A red note is
+        # also what explains footer text that names ITAR/EAR, so such text is not a reason for a review.
+        cache = {}
+
+        def red_note(page_no):
+            if page_no not in cache:
+                try:
+                    cache[page_no] = find_red_notes(doc.load_page(page_no - 1), page_no)
+                except Exception:
+                    cache[page_no] = None
+            return cache[page_no]
+
+        if not hits:
+            res.export_notes = [n for n in (red_note(i) for i in range(1, res.pages_scanned + 1)) if n]
+            for n in res.export_notes:
+                infos.append(f"page {n['page']}: red export-control note mentions {', '.join(n['regimes'])} (no logo)")
+        for page_no, word in mentions:
+            if red_note(page_no) is None:
+                notes.append(f"page {page_no}: footer text mentions '{word}' but no logo was found - verify")
     except Exception as exc:
         res.category, res.status, res.notes = UNREADABLE, STATUS_ERROR, [str(exc)] + notes
         res.seconds = round(time.time() - t0, 2)

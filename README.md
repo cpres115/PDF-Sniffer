@@ -31,10 +31,10 @@ could not judge is never silently reported as `Non-Controlled`.
 Everything the program needs is already in the `vendor` folder (Python 3.13, PyMuPDF, NumPy, openpyxl,
 OCR data). To move the program, copy the whole folder.
 
-**Check it works on your computer:** double-click **`Run Self-Test.bat`**. It builds 26 sample PDFs (vector,
-picture and "scanned" logos, a large E-size drawing, rotated pages, MWI-style pages with an explanatory logo table,
-ECCNs placed far from the logo, look-alike decoys, a corrupt file, an encrypted file, ...) and confirms each is
-classified correctly. You should see `Self-test PASSED`.
+**Check it works on your computer:** double-click **`Run Self-Test.bat`**. It builds 31 sample PDFs (vector,
+picture and "scanned" logos including the bold-ringed real logo, a large E-size drawing, rotated pages, MWI-style pages
+with an explanatory logo table, ECCNs placed far from the logo, old documents with a red export warning instead of a
+logo, look-alike decoys, a corrupt file, an encrypted file, ...) and confirms each is classified correctly. You should see `Self-test PASSED`.
 
 ## Run
 
@@ -100,6 +100,16 @@ shows **Classification In Name** and **Name vs Logo** for every file), and each 
 | **High** | name says EAR, but the logo says ITAR | the stricter regime applies |
 | Medium | name says ITAR, but the logo says EAR | check which is right |
 | Medium | name says ITAR/EAR, but no logo was found | the logo may be missing from the PDF, or the scan missed it - check the page |
+
+**Older documents with a red export warning instead of a logo** pass too. If a file has no logo but carries red text that
+names the EAR and/or the ITAR (`EAR`, `ITAR`, `Export Administration Regulations`, `International Traffic in Arms
+Regulations`; e.g. *"WARNING - This document contains Controlled Technical Data ... restricted by the EAR or the ITAR"*),
+a file named `-EAR` or `-ITAR` is reported as *Match - red export-control note instead of a logo* when the note names that
+regime (a note naming both satisfies either tag). The note's regimes are shown in the **Red Export Note** column. Only
+**red** text counts - black text that merely mentions the regulations does not - and a note naming only the other regime
+(file named `-ITAR`, note mentions only the EAR) is still a Medium mismatch. A red note never changes a file's group
+(`Non-Controlled`, ...); it only satisfies this check and the footer-text review. It is read from the PDF's text layer,
+so a red note that is part of a scanned picture is not seen.
 
 Files whose scan ended as *Needs Review* or *Unreadable* cannot be compared and are counted separately. `EAR99` in a name
 counts as EAR; the ECCN itself is not compared. Only the tag in the **file name** counts (not the folder), and it is read
@@ -184,9 +194,10 @@ heading being real text; in a scanned MWI page it cannot be found.
 For **every page**, the program looks at the lower 55% of the page as the person sees it (this covers a
 document footer and the lower-right corner above a drawing's title block, and respects page rotation):
 
-1. **Find red circles.** The area is rendered to pixels, red ink is isolated and thin, closed circle outlines of
-   plausible logo size (0.2 - 2.5 in) are located. This works the same for vector drawings, embedded logo pictures
-   and scanned pages. Filled discs, squares, red text and red rectangles are ignored.
+1. **Find red circles.** The area is rendered to pixels, red ink is isolated and closed circle outlines of
+   plausible logo size (0.2 - 2.5 in) are located - thin or bold rings (the real logo's ring is about a third of its
+   radius thick). This works the same for vector drawings, embedded logo pictures and scanned pages. Solid discs,
+   squares, red text and red rectangles are ignored.
 2. **Read the text inside the circle** from the PDF text layer when there is one; otherwise by OCR of just the red
    ink. The letter shapes (four letters starting with a thin "I" = ITAR; three = EAR) are a second opinion that
    upgrades confidence but can never confirm a logo alone. A ring containing other text (for example a revision
@@ -200,8 +211,8 @@ document footer and the lower-right corner above a drawing's title block, and re
 
 A file is flagged, but still placed in its best group, when: its file-name tag disagrees with its logo (see "Name vs logo"); a red ring with unreadable text was found; ITAR and EAR
 both appear; several different ECCNs appear (the group is then e.g. `EAR Controlled - ECCN 3A001 + 9A610`);
-the ECCN was not labelled "ECCN"; the logo text was confirmed by OCR only; the footer *text* mentions ITAR/EAR/ECCN but
-no logo was found; a page was mostly red or could not be analysed; or not every page was scanned (time limit).
+the ECCN was not labelled "ECCN"; the logo text was confirmed by OCR only; black footer *text* mentions ITAR/EAR/ECCN but
+no logo was found (a *red* export-control note is not a reason for a review); a page was mostly red or could not be analysed; or not every page was scanned (time limit).
 
 ## Please verify on your own files first
 

@@ -67,6 +67,14 @@ class RingTests(unittest.TestCase):
         for name, m in (("disc", disc), ("square", square), ("half ring", half)):
             self.assertEqual(imaging.find_rings(m, 30, 200), [], name)
 
+    def test_bold_rings_like_the_real_logo_are_accepted(self):
+        # the real logo's ring is about 27% of its radius thick; solid discs must still be rejected
+        for thickness in (0.10, 0.27, 0.35, 0.40):
+            mask = ring_mask((200, 200), 100, 100, 50, 50 * thickness)
+            self.assertEqual(len(imaging.find_rings(mask, 40, 150)), 1, thickness)
+        yy, xx = np.mgrid[:200, :200]
+        self.assertEqual(imaging.find_rings(np.hypot(xx - 100, yy - 100) <= 50, 40, 150), [])
+
     def test_broken_ring_is_bridged(self):
         mask = ring_mask((200, 200), 100, 100, 50, 3)
         mask[48:53, 95:105] = False  # 5px gap in the outline
@@ -74,6 +82,11 @@ class RingTests(unittest.TestCase):
 
 
 class RedMaskTests(unittest.TestCase):
+    def test_scalar_red_rule_matches_the_mask(self):
+        for rgb, expected in (((255, 0, 0), True), ((192, 0, 0), True), ((237, 28, 36), True), ((200, 30, 30), True),
+                              ((0, 0, 0), False), ((255, 165, 0), False), ((120, 60, 60), False), ((0, 0, 255), False)):
+            self.assertEqual(imaging.is_red_rgb(*rgb), expected, rgb)
+
     def test_colours(self):
         px = np.array([[[255, 0, 0], [200, 30, 30], [255, 128, 128], [255, 165, 0], [0, 0, 0],
                         [255, 255, 255], [120, 60, 60], [255, 190, 190], [0, 0, 255]]], dtype=np.uint8)

@@ -27,9 +27,12 @@ def ear_cat(*eccns):
     return models.EAR_PREFIX + " + ".join(eccns)
 
 
-def draw_logo(page, cx, cy, r, word, font="hebo", color=RED):
-    page.draw_circle((cx, cy), r, color=color, width=r * 0.09)
-    fs = r * 0.62
+def draw_logo(page, cx, cy, r, word, font="hebo", color=RED, ring=0.09, text=0.62):
+    """Draw an export-control logo: a red ring (stroke width = ring * r) with red text (size text * r).
+
+    The real logo has a bold ring: about 0.33 of its radius thick as measured by the detector (ring=0.33, text=0.5)."""
+    page.draw_circle((cx, cy), r, color=color, width=r * ring)
+    fs = r * text
     tw = pymupdf.get_text_length(word, fontname=font, fontsize=fs)
     page.insert_text((cx - tw / 2, cy + fs * 0.35), word, fontname=font, fontsize=fs, color=color)
 
@@ -49,11 +52,11 @@ def _scan_copy(doc, dpi, quality, noise=6.0, seed=1):
     return out
 
 
-def _picture_logo(page, cx, cy, r, word, font="hebo"):
+def _picture_logo(page, cx, cy, r, word, font="hebo", **style):
     """Insert the logo as an embedded PNG image (no text layer)."""
     tmp = pymupdf.open()
     tp = tmp.new_page(width=2 * r + 8, height=2 * r + 8)
-    draw_logo(tp, r + 4, r + 4, r, word, font)
+    draw_logo(tp, r + 4, r + 4, r, word, font, **style)
     png = tp.get_pixmap(dpi=300, alpha=False).tobytes("png")
     page.insert_image(pymupdf.Rect(cx - r - 4, cy - r - 4, cx + r + 4, cy + r + 4), stream=png)
 
@@ -239,6 +242,33 @@ def build_samples(folder):
     draw_logo(page, 1224 - 140, 792 - 250, 28, "EAR")
     page.insert_text((1224 - 330, 792 - 250 - 3 * 56), "ECCN 6A002", fontsize=12)
     save("25_drawing_scanned_eccn_far_above_logo.pdf", _scan_copy(doc, dpi=150, quality=55), ear_cat("6A002"))
+
+    # --- the real logo has a much bolder ring than the first samples (about a third of its radius)
+    doc, page = _letter()
+    _picture_logo(page, 548, 765, 22, "EAR", ring=0.33, text=0.5)
+    save("26_document_ear_bold_ring_picture.pdf", doc, E_EAR)
+
+    doc, page = _letter()
+    draw_logo(page, 548, 765, 22, "ITAR", ring=0.33, text=0.5)
+    save("27_document_itar_bold_ring_vector.pdf", doc, E_ITAR)
+
+    doc, page = _letter()
+    _picture_logo(page, 520, 750, 26, "EAR", ring=0.40, text=0.42)
+    page.insert_text((360, 756), "ECCN: 9E003", fontsize=10)
+    save("28_document_ear_very_bold_ring_picture_eccn.pdf", doc, ear_cat("9E003"))
+
+    # --- old documents: no logo, but a red export-control warning
+    warning = ("WARNING - This document contains Controlled Technical Data, export of which is restricted by the "
+               "Export Administration Regulations (\"EAR\") or the International Traffic in Arms Regulations "
+               "(\"ITAR\"). Disclosure to foreign persons contrary to the EAR or the ITAR is prohibited.")
+    doc, page = _letter()
+    page.insert_textbox(pymupdf.Rect(72, 520, 540, 580), warning, fontsize=9, fontname="heit", color=(1, 0, 0))
+    save("29_document_old_red_note_no_logo.pdf", doc, E_NONE)
+
+    doc, page = _letter("DOC-000-001_C")
+    page.insert_textbox(pymupdf.Rect(72, 700, 540, 740), "WARNING - export restricted by the Export Administration "
+                        "Regulations (EAR).", fontsize=9, fontname="heit", color=(0.8, 0, 0))
+    save("30_document_old_red_note_in_footer.pdf", doc, E_NONE)
 
     return expected
 

@@ -40,6 +40,12 @@ def _red_core(rgb, strong_diff, weak_diff):
     return base & (d >= strong_diff), base & (d >= weak_diff)
 
 
+def is_red_rgb(r, g, b, min_diff=70):
+    """The same 'red ink' rule as red_mask, for a single colour (0-255 per channel)."""
+    d = r - max(g, b)
+    return r >= 100 and d >= min_diff and abs(g - b) <= 0.45 * d
+
+
 def red_mask(rgb, strong_diff=70, weak_diff=35, chunk_rows=800):
     """Boolean mask of 'red ink' pixels in an HxWx3 uint8 array.
 
@@ -167,7 +173,7 @@ def _cast_rays(mask, cx, cy, r, n_rays):
     return ang, steps, hit, first, end
 
 
-def fit_ring(mask, cx, cy, r, n_rays=96, max_thickness=0.30, tol=0.12):
+def fit_ring(mask, cx, cy, r, n_rays=96, max_thickness=0.50, tol=0.12):
     """Test whether the red ink around (cx, cy) forms a thin, closed circle of radius ~r.
 
     Returns a Ring (with a least-squares refined centre/radius) or None.

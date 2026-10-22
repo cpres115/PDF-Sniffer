@@ -12,7 +12,7 @@ from pathlib import Path
 from . import models, namecheck, revisions
 
 COLUMNS = ["Category", "Status", "File Name", "Drawing Number", "Revision", "Classification In Name", "Name vs Logo",
-           "Folder", "ECCN (as written)", "Logo(s) Found",
+           "Red Export Note", "Folder", "ECCN (as written)", "Logo(s) Found",
            "Logo Pages", "Detection", "Pages", "Pages Scanned", "Size (KB)", "Last Modified",
            "Notes", "Evidence Image(s)", "Full Path"]
 
@@ -48,6 +48,7 @@ def _row(r):
         ("Drawing Number", r.get("drawing_number", "")), ("Revision", r.get("revision", "")),
         ("Classification In Name", (r.get("name_class") or "(none)") if "name_class" in r else ""),
         ("Name vs Logo", r.get("name_vs_logo", "")),
+        ("Red Export Note", ", ".join(sorted(namecheck.note_regimes(r)))),
         ("Folder", str(p.parent)), ("ECCN (as written)", ", ".join(eccns)),
         ("Logo(s) Found", ", ".join(f"{k} x{v}" for k, v in sorted(labels.items()))),
         ("Logo Pages", ", ".join(map(str, pages))), ("Detection", "; ".join(methods)),
@@ -79,7 +80,8 @@ def revision_summary_lines(stats):
 def name_summary_lines(stats):
     return ["NAME vs LOGO CHECK (ITAR/EAR tag in the file name compared with the logo in the PDF)", "-" * 60,
             f"  Files compared:                                      {stats['compared']}",
-            f"  Agree:                                               {stats['match']}",
+            f"  Agree:                                               {stats['match']}"
+            + (f"   ({stats['by_note']} by a red export note instead of a logo)" if stats["by_note"] else ""),
             f"  Disagree:                                            {stats['mismatch']}"
             f"   (High: {stats['high']}, Medium: {stats['medium']})",
             f"  Could not compare (needs review / unreadable):       {stats['not_compared']}"]
@@ -168,6 +170,7 @@ def _add_name_summary(ws, stats):
     ws.append(["Name vs logo check"])
     ws.cell(ws.max_row, 1).font = Font(bold=True)
     for label, key in (("Files compared", "compared"), ("Name and logo agree", "match"),
+                       ("  of which by a red export note instead of a logo", "by_note"),
                        ("Name and logo disagree", "mismatch"),
                        ("  High: logo is stricter than the name", "high"),
                        ("  Medium: name is stricter than the logo / no logo found", "medium"),
@@ -313,7 +316,8 @@ def write_xlsx(results, path, folders, skipped, rev=None, skipped_dirs=(), names
         widths = {"Category": 38, "Status": 9, "File Name": 38, "Folder": 40, "ECCN (as written)": 18,
                   "Logo(s) Found": 14, "Logo Pages": 10, "Detection": 22, "Pages": 7, "Pages Scanned": 9,
                   "Size (KB)": 10, "Last Modified": 17, "Notes": 60, "Evidence Image(s)": 30, "Full Path": 60,
-                  "Drawing Number": 20, "Revision": 9, "Classification In Name": 16, "Name vs Logo": 40}
+                  "Drawing Number": 20, "Revision": 9, "Classification In Name": 16, "Name vs Logo": 40,
+                  "Red Export Note": 14}
         for i, col in enumerate(COLUMNS, 1):
             s.column_dimensions[get_column_letter(i)].width = widths[col]
         for row in s.iter_rows(min_row=2):

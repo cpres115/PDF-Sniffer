@@ -12,6 +12,10 @@ the scan actually found in the PDF and reports every disagreement:
   Medium  the name is stricter than the logo  (name says ITAR but the logo says EAR; name says ITAR/EAR but no
           logo was found - the logo may be missing, or the scan may have missed it)
 
+Older documents have no round logo but a red export-control warning that names the EAR and/or the ITAR.
+Such a note counts like a logo for this check: a file named -EAR / -ITAR with no logo passes when its red note
+names that regime (a note that mentions both regimes satisfies either name).
+
 Files whose scan ended in "Needs Review" or "Unreadable" cannot be compared.  EAR99 counts as EAR.
 """
 from collections import OrderedDict
@@ -21,6 +25,7 @@ from pathlib import Path
 from . import models, revisions
 
 MATCH = "Match"
+MATCH_NOTE = "Match - red export-control note instead of a logo"
 NOT_COMPARED = "Could not compare"
 HIGH, MEDIUM = "High", "Medium"
 
@@ -44,14 +49,25 @@ def logo_classification(result):
     return "ITAR" if "ITAR" in labels else "EAR" if "EAR" in labels else ""
 
 
-def verdict(name_class, logo_class):
-    """-> (text, priority).  text is MATCH / NOT_COMPARED or a description of the mismatch."""
+def note_regimes(result):
+    """The regimes ('EAR' / 'ITAR') named by the red export-control notes found in a scan result."""
+    return frozenset(r for n in result.get("export_notes", ()) for r in n["regimes"])
+
+
+def verdict(name_class, logo_class, regimes=frozenset()):
+    """-> (text, priority).  text is MATCH / MATCH_NOTE / NOT_COMPARED or a description of the mismatch.
+
+    `regimes` are the regimes named by a red export-control note (used only when no logo was found)."""
     if logo_class is None:
         return NOT_COMPARED, ""
     if name_class == logo_class:
         return MATCH, ""
+    if not logo_class and name_class in regimes:
+        return MATCH_NOTE, ""
     if not logo_class:
         text = f"Name says {name_class}, no ITAR/EAR logo found"
+        if regimes:
+            text += f" (its red export note mentions only {' and '.join(sorted(regimes))})"
     elif not name_class:
         text = f"Name has no ITAR/EAR tag, but the file carries an {logo_class} logo"
     else:
@@ -62,19 +78,20 @@ def verdict(name_class, logo_class):
 def check(results, redline_re=revisions._DEFAULT_REDLINE_RE):
     """Compare every scanned file.  Annotates each result dict ('name_class', 'name_vs_logo'), marks mismatches
     for review (status + note) and returns a NameCheck."""
-    stats = {"compared": 0, "match": 0, "mismatch": 0, "high": 0, "medium": 0, "not_compared": 0}
+    stats = {"compared": 0, "match": 0, "by_note": 0, "mismatch": 0, "high": 0, "medium": 0, "not_compared": 0}
     rows = []
     for r in results:
         name_class = revisions.classification_in_name(r["path"], redline_re)
         logo_class = logo_classification(r)
-        text, priority = verdict(name_class, logo_class)
+        text, priority = verdict(name_class, logo_class, note_regimes(r))
         r["name_class"], r["name_vs_logo"] = name_class, text
         if text == NOT_COMPARED:
             stats["not_compared"] += 1
             continue
         stats["compared"] += 1
-        if text == MATCH:
+        if text in (MATCH, MATCH_NOTE):
             stats["match"] += 1
+            stats["by_note"] += text == MATCH_NOTE
             continue
         stats["mismatch"] += 1
         stats["high" if priority == HIGH else "medium"] += 1

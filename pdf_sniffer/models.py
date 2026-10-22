@@ -48,6 +48,7 @@ class FileResult:
     status: str = STATUS_OK
     hits: list = field(default_factory=list)      # list[LogoHit as dict]
     suspects: list = field(default_factory=list)  # list[LogoHit as dict]
+    export_notes: list = field(default_factory=list)  # red export-control notes (no-logo files): {page, regimes, text}
     notes: list = field(default_factory=list)     # reasons the file needs a look (set status REVIEW)
     info: list = field(default_factory=list)      # FYI only (e.g. explanatory logos that were ignored)
     seconds: float = 0.0
