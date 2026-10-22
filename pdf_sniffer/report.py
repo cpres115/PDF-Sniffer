@@ -6,9 +6,10 @@ import time
 from collections import Counter, OrderedDict
 from pathlib import Path
 
-from . import models, revisions
+from . import models, namecheck, revisions
 
-COLUMNS = ["Category", "Status", "File Name", "Drawing Number", "Revision", "Folder", "ECCN (as written)", "Logo(s) Found",
+COLUMNS = ["Category", "Status", "File Name", "Drawing Number", "Revision", "Classification In Name", "Name vs Logo",
+           "Folder", "ECCN (as written)", "Logo(s) Found",
            "Logo Pages", "Detection", "Pages", "Pages Scanned", "Size (KB)", "Last Modified",
            "Notes", "Evidence Image(s)", "Full Path"]
 
@@ -42,6 +43,8 @@ def _row(r):
     return OrderedDict([
         ("Category", r["category"]), ("Status", r["status"]), ("File Name", p.name),
         ("Drawing Number", r.get("drawing_number", "")), ("Revision", r.get("revision", "")),
+        ("Classification In Name", (r.get("name_class") or "(none)") if "name_class" in r else ""),
+        ("Name vs Logo", r.get("name_vs_logo", "")),
         ("Folder", str(p.parent)), ("ECCN (as written)", ", ".join(eccns)),
         ("Logo(s) Found", ", ".join(f"{k} x{v}" for k, v in sorted(labels.items()))),
         ("Logo Pages", ", ".join(map(str, pages))), ("Detection", "; ".join(methods)),
@@ -70,6 +73,15 @@ def revision_summary_lines(stats):
             f"  File names with no drawing number at all:            {stats['unparsed']}"]
 
 
+def name_summary_lines(stats):
+    return ["NAME vs LOGO CHECK (ITAR/EAR tag in the file name compared with the logo in the PDF)", "-" * 60,
+            f"  Files compared:                                      {stats['compared']}",
+            f"  Agree:                                               {stats['match']}",
+            f"  Disagree:                                            {stats['mismatch']}"
+            f"   (High: {stats['high']}, Medium: {stats['medium']})",
+            f"  Could not compare (needs review / unreadable):       {stats['not_compared']}"]
+
+
 def skipped_dir_lines(skipped_dirs, limit=10):
     if not skipped_dirs:
         return []
@@ -79,7 +91,7 @@ def skipped_dir_lines(skipped_dirs, limit=10):
     return lines
 
 
-def summary_text(results, folders, skipped, seconds, run_dir, rev=None, skipped_dirs=()):
+def summary_text(results, folders, skipped, seconds, run_dir, rev=None, skipped_dirs=(), names=None):
     lines = ["PDF SNIFFER - CLASSIFICATION SUMMARY", "=" * 60,
              "Folders scanned:"] + [f"  {f}" for f in folders]
     lines += ["", f"PDF files scanned: {len(results)}   (elapsed {seconds / 60:.1f} min)", ""]
@@ -93,6 +105,8 @@ def summary_text(results, folders, skipped, seconds, run_dir, rev=None, skipped_
         other = ", ".join(f"{n} x {ext}" for ext, n in skipped.most_common(8))
         lines += ["", f"Non-PDF files ignored: {sum(skipped.values())} ({other})"]
     lines += skipped_dir_lines(skipped_dirs)
+    if names is not None:
+        lines += [""] + name_summary_lines(names.stats)
     if rev is not None:
         lines += [""] + revision_summary_lines(rev.stats)
     lines += ["", f"Reports saved in: {run_dir}"]
@@ -114,7 +128,11 @@ REV_FILLS = {revisions.STATUS_NEWEST: "E2F0D9", revisions.STATUS_REDLINE_CURRENT
 SHEET_WIDTHS = {"Drawing Number": 20, "Revision": 9, "Status": 34, "File Name": 40, "Folder": 44,
                 "Last Modified": 17, "Size (KB)": 10, "Revisions On Server": 20, "Export Control Group": 34,
                 "Notes": 44, "Name Read By": 28, "Full Path": 60, "Redline File": 40, "Redline Word": 14,
-                "Plain File(s) It Makes Out Of Date": 44, "Name Tags": 20}
+                "Plain File(s) It Makes Out Of Date": 44, "Name Tags": 20,
+                "Priority": 10, "Mismatch": 56, "Classification In Name": 16, "Classification From Logo": 34,
+                "Name vs Logo": 40, "ECCN (as written)": 18, "Logo Pages": 10, "Detection": 22,
+                "Evidence Image(s)": 30}
+NAME_FILLS = {namecheck.HIGH: "F8CBAD", namecheck.MEDIUM: "FFE699"}
 
 
 def write_rows_csv(rows, columns, path):
@@ -124,22 +142,53 @@ def write_rows_csv(rows, columns, path):
         w.writerows(rows)
 
 
+def write_name_csv(names, run_dir):
+    write_rows_csv(names.rows, namecheck.COLUMNS, Path(run_dir) / "name_vs_logo.csv")
+
+
+def _add_name_sheet(wb, names):
+    _add_table_sheet(wb, "Name vs Logo", namecheck.COLUMNS, names.rows,
+                     "Every file name agrees with the logo found in the PDF.", "Priority", NAME_FILLS)
+    ws = wb["Name vs Logo"]
+    col = namecheck.COLUMNS.index("Evidence Image(s)") + 1
+    from openpyxl.styles import Font
+    for row in range(2, ws.max_row + 1):
+        cell = ws.cell(row, col)
+        if cell.value:
+            cell.hyperlink = "evidence/" + str(cell.value).split("; ")[0]
+            cell.font = Font(color="0563C1", underline="single")
+
+
+def _add_name_summary(ws, stats):
+    from openpyxl.styles import Font
+    ws.append([])
+    ws.append(["Name vs logo check"])
+    ws.cell(ws.max_row, 1).font = Font(bold=True)
+    for label, key in (("Files compared", "compared"), ("Name and logo agree", "match"),
+                       ("Name and logo disagree", "mismatch"),
+                       ("  High: logo is stricter than the name", "high"),
+                       ("  Medium: name is stricter than the logo / no logo found", "medium"),
+                       ("Could not compare (needs review / unreadable)", "not_compared")):
+        ws.append([label, stats[key]])
+
+
 def write_revision_csvs(rev, run_dir):
     write_rows_csv(rev.rows, revisions.REVISION_COLUMNS, Path(run_dir) / "revision_check.csv")
     write_rows_csv(rev.redlines, revisions.REDLINE_COLUMNS, Path(run_dir) / "redlines.csv")
 
 
-def _add_table_sheet(wb, title, columns, rows, empty_text):
+def _add_table_sheet(wb, title, columns, rows, empty_text, fill_column="Status", fills=None):
     from openpyxl.styles import Alignment, Font, PatternFill
     from openpyxl.utils import get_column_letter
     ws = wb.create_sheet(title)
     ws.append(columns)
     for c in ws[1]:
         c.font, c.fill = Font(bold=True, color="FFFFFF"), PatternFill("solid", fgColor="1F3864")
-    status_col = columns.index("Status") + 1
+    fills = REV_FILLS if fills is None else fills
+    status_col = columns.index(fill_column) + 1
     for row in rows:
         ws.append([row[k] for k in columns])
-        fill = REV_FILLS.get(row["Status"])
+        fill = fills.get(row[fill_column])
         if fill:
             ws.cell(ws.max_row, status_col).fill = PatternFill("solid", fgColor=fill)
     if not rows:
@@ -204,7 +253,7 @@ def write_revision_xlsx(rev, path, folders, skipped_dirs=()):
     wb.save(path)
 
 
-def write_xlsx(results, path, folders, skipped, rev=None, skipped_dirs=()):
+def write_xlsx(results, path, folders, skipped, rev=None, skipped_dirs=(), names=None):
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Font, PatternFill
     from openpyxl.utils import get_column_letter
@@ -235,6 +284,8 @@ def write_xlsx(results, path, folders, skipped, rev=None, skipped_dirs=()):
     for f in folders:
         ws.append([str(f)])
     _add_skipped_dirs(ws, skipped_dirs)
+    if names is not None:
+        _add_name_summary(ws, names.stats)
     if rev is not None:
         _add_revision_summary(ws, rev.stats)
     ws.column_dimensions["A"].width = 52
@@ -259,7 +310,7 @@ def write_xlsx(results, path, folders, skipped, rev=None, skipped_dirs=()):
         widths = {"Category": 38, "Status": 9, "File Name": 38, "Folder": 40, "ECCN (as written)": 18,
                   "Logo(s) Found": 14, "Logo Pages": 10, "Detection": 22, "Pages": 7, "Pages Scanned": 9,
                   "Size (KB)": 10, "Last Modified": 17, "Notes": 60, "Evidence Image(s)": 30, "Full Path": 60,
-                  "Drawing Number": 20, "Revision": 9}
+                  "Drawing Number": 20, "Revision": 9, "Classification In Name": 16, "Name vs Logo": 40}
         for i, col in enumerate(COLUMNS, 1):
             s.column_dimensions[get_column_letter(i)].width = widths[col]
         for row in s.iter_rows(min_row=2):
@@ -267,6 +318,8 @@ def write_xlsx(results, path, folders, skipped, rev=None, skipped_dirs=()):
 
     sheet("All Files", rows)
     sheet("Needs Attention", [r for r in rows if r["Status"] != models.STATUS_OK])
+    if names is not None:
+        _add_name_sheet(wb, names)
     if rev is not None:
         _add_revision_sheets(wb, rev)
     wb.save(path)

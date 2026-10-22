@@ -290,6 +290,13 @@ def _classification(info):
     return max((t for t in info.tags if t in _CLASS_ORDER), key=_CLASS_ORDER.get, default="")
 
 
+def classification_in_name(filename, redline_re=_DEFAULT_REDLINE_RE):
+    """The classification tag written in a file name: 'ITAR', 'EAR' (EAR99 counts as EAR) or '' (no tag)."""
+    tags = _find_tags(_stem(filename), redline_re)
+    strictest = max((t for t in tags if t in _CLASS_ORDER), key=_CLASS_ORDER.get, default="")
+    return "EAR" if strictest == "EAR99" else strictest
+
+
 def _natural(text):
     return [int(t) if t.isdigit() else t for t in re.split(r"(\d+)", text)]
 

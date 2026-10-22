@@ -6,7 +6,7 @@ import sys
 import time
 from pathlib import Path
 
-from . import __version__, ocr, paths, report, revisions, runner, settings
+from . import __version__, namecheck, ocr, paths, report, revisions, runner, settings
 from .config import SCANNER_VERSION, ScanConfig
 
 
@@ -176,13 +176,15 @@ def main(argv=None):
     seconds = time.time() - t0
 
     rev = revisions.analyze(results, name_pattern, redline_re)  # also adds drawing number / revision
+    names = namecheck.check(results, redline_re)                # also flags files whose name and logo disagree
     report.write_csv(results, run_dir / "classification_report.csv")
     report.write_revision_csvs(rev, run_dir)
+    report.write_name_csv(names, run_dir)
     try:
-        report.write_xlsx(results, run_dir / "classification_report.xlsx", folders, skipped, rev, skipped_dirs)
+        report.write_xlsx(results, run_dir / "classification_report.xlsx", folders, skipped, rev, skipped_dirs, names)
     except Exception as exc:  # the CSV files are already written
         print(f"(Excel report could not be written: {exc})")
-    text = report.summary_text(results, folders, skipped, seconds, run_dir, rev, skipped_dirs)
+    text = report.summary_text(results, folders, skipped, seconds, run_dir, rev, skipped_dirs, names)
     (run_dir / "summary.txt").write_text(text + "\n", encoding="utf-8")
     print("\n" + text)
     if args.copy_to:

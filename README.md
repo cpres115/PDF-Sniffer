@@ -51,6 +51,7 @@ Each run creates `output\run_<date>_<time>\` inside the program folder:
 * `classification_report.xlsx` - sheet **Summary** (counts per group), **All Files** (filterable, colour-coded),
   **Needs Attention** (everything flagged `REVIEW` or `ERROR`)
 * `classification_report.csv` - the same list for other tools
+* `name_vs_logo.csv` / sheet **Name vs Logo** - files whose `-ITAR` / `-EAR` file-name tag disagrees with the logo (see below)
 * `revision_check.csv` / sheet **Revision Check** - old revisions, redlines and copies left on the server (see below)
 * `redlines.csv` / sheet **Redlines** - every REDLINE file with a count
 * `evidence\` - a picture of every logo found. It always shows the whole area searched for the ECCN (8 logo
@@ -81,6 +82,25 @@ was recognised, and notes. Files with different paragraph suffixes (`9A610.x`, `
 | `--advisory-phrase TEXT` | one more heading that marks an explanatory logo table to ignore (repeatable) |
 
 Linux / macOS: `./run_pdf_sniffer.sh <folders>` (needs Python 3.10+ and internet once to install into `runtime/`).
+
+## Name vs logo check
+
+In your library the classification is written into the file name (`..._B-EAR.pdf`, `..._A-ITAR.pdf`; untagged = not
+controlled). After the scan, every PDF's name tag is compared with the logo actually found in it (the *All Files* sheet
+shows **Classification In Name** and **Name vs Logo** for every file), and each disagreement is listed in the
+**Name vs Logo** sheet / `name_vs_logo.csv`, with the evidence picture, and the file is flagged `REVIEW`:
+
+| Priority | Mismatch | Meaning |
+|---|---|---|
+| **High** | name has no tag, but the file carries an ITAR or an EAR logo | possibly under-protected: controlled content filed as uncontrolled |
+| **High** | name says EAR, but the logo says ITAR | the stricter regime applies |
+| Medium | name says ITAR, but the logo says EAR | check which is right |
+| Medium | name says ITAR/EAR, but no logo was found | the logo may be missing from the PDF, or the scan missed it - check the page |
+
+Files whose scan ended as *Needs Review* or *Unreadable* cannot be compared and are counted separately. `EAR99` in a name
+counts as EAR; the ECCN itself is not compared. Only the tag in the **file name** counts (not the folder), and it is read
+the same way as in the revision check (`-EAR`, `_ITAR`, `-ITAR Redline`, `... ITAR.pdf`; colour words like `RED` are not
+tags). The check needs the content scan, so it is not part of `--revisions-only`.
 
 ## Revision check: old revisions and redlines left on the server
 
@@ -174,7 +194,7 @@ document footer and the lower-right corner above a drawing's title block, and re
 
 ### Flags (Status `REVIEW`) - check these by eye
 
-A file is flagged, but still placed in its best group, when: a red ring with unreadable text was found; ITAR and EAR
+A file is flagged, but still placed in its best group, when: its file-name tag disagrees with its logo (see "Name vs logo"); a red ring with unreadable text was found; ITAR and EAR
 both appear; several different ECCNs appear (the group is then e.g. `EAR Controlled - ECCN 3A001 + 9A610`);
 the ECCN was not labelled "ECCN"; the logo text was confirmed by OCR only; the footer *text* mentions ITAR/EAR/ECCN but
 no logo was found; a page was mostly red or could not be analysed; or not every page was scanned (time limit).
@@ -215,7 +235,8 @@ example only in the title block) is found only if it is written "ECCN ...".
 ```
 pdf_sniffer/      imaging.py (red mask, components, circle fit)   logo_reader.py (ITAR/EAR reading)
                   scanner.py (per page / per file, ECCN search, advisory tables, evidence)   eccn.py
-                  classify.py   revisions.py (drawing number / revision / redline check)   settings.py (settings.ini)
+                  classify.py   revisions.py (drawing number / revision / redline check)   namecheck.py (name tag vs logo)
+                  settings.py (settings.ini)
                   runner.py (parallel, resume)   report.py   selftest.py (sample PDFs)   __main__.py (CLI)
 settings.ini         optional: file-name pattern, redline words, skipped folders, advisory-table headings
 tools/bootstrap.py   first-run installer used by the .bat files
