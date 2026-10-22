@@ -1,3 +1,6 @@
+# Author:  Corey Preston
+# Company: Fischer Connectors, Inc
+# Date:    October 2026
 import os
 import tempfile
 import unittest

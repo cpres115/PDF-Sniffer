@@ -1,3 +1,6 @@
+# Author:  Corey Preston
+# Company: Fischer Connectors, Inc
+# Date:    October 2026
 """Command-line entry point:  python -m pdf_sniffer [folders...]"""
 import argparse
 import multiprocessing

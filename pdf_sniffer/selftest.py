@@ -1,3 +1,6 @@
+# Author:  Corey Preston
+# Company: Fischer Connectors, Inc
+# Date:    October 2026
 """Synthetic sample PDFs with known answers, used by `--selftest` and the unit tests.
 
 Nothing here is real export-controlled data: the logos are drawn on the fly as a red

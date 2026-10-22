@@ -1,3 +1,6 @@
+# Author:  Corey Preston
+# Company: Fischer Connectors, Inc
+# Date:    October 2026
 """Scan one PDF: find red-circle logos in the search zone of every page and read them."""
 import contextlib
 import hashlib

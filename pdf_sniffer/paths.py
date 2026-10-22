@@ -1,3 +1,6 @@
+# Author:  Corey Preston
+# Company: Fischer Connectors, Inc
+# Date:    October 2026
 """Locations of bundled resources (everything lives inside the program folder)."""
 import os
 from pathlib import Path

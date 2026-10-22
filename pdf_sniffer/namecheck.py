@@ -1,3 +1,6 @@
+# Author:  Corey Preston
+# Company: Fischer Connectors, Inc
+# Date:    October 2026
 """Name-versus-logo check.
 
 In the library every controlled drawing carries its classification in the file name (``..._B-EAR.pdf``,

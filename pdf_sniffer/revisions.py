@@ -1,3 +1,6 @@
+# Author:  Corey Preston
+# Company: Fischer Connectors, Inc
+# Date:    October 2026
 """Drawing number / revision / REDLINE handling and the "out-of-date files on the server" check.
 
 In a version-controlled location the file name is <drawing number>_<revision>, optionally followed by tags,

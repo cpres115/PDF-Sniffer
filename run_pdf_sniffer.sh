@@ -1,4 +1,7 @@
 #!/usr/bin/env sh
+# Author:  Corey Preston
+# Company: Fischer Connectors, Inc
+# Date:    October 2026
 # Linux / macOS launcher.  Installs the libraries into ./runtime on first use (needs Python 3.10+ and internet once).
 set -e
 cd "$(dirname "$0")"

@@ -1,3 +1,6 @@
+# Author:  Corey Preston
+# Company: Fischer Connectors, Inc
+# Date:    October 2026
 """Decide whether a red ring contains the word ITAR or EAR.
 
 Three independent signals are combined:

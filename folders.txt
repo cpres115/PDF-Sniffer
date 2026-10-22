@@ -1,3 +1,6 @@
+# Author:  Corey Preston
+# Company: Fischer Connectors, Inc
+# Date:    October 2026
 # List the folders to scan, one per line (sub-folders are included automatically).
 # Lines starting with # are ignored.  Examples:
 #

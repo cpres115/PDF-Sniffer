@@ -1,4 +1,7 @@
 @echo off
+rem Author:  Corey Preston
+rem Company: Fischer Connectors, Inc
+rem Date:    October 2026
 setlocal EnableExtensions
 rem PDF Sniffer launcher. Double-click, or drag one or more folders onto this file.
 pushd "%~dp0"

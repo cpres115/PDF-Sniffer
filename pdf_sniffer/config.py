@@ -1,3 +1,6 @@
+# Author:  Corey Preston
+# Company: Fischer Connectors, Inc
+# Date:    October 2026
 """Tunable settings.  Defaults suit US-letter documents and ANSI/ISO engineering drawings."""
 from dataclasses import asdict, dataclass, fields
 

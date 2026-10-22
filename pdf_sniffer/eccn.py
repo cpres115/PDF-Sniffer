@@ -1,3 +1,6 @@
+# Author:  Corey Preston
+# Company: Fischer Connectors, Inc
+# Date:    October 2026
 """ECCN (Export Control Classification Number) parsing.
 
 An ECCN is <digit 0-9><letter A-E><3 digits>, e.g. 9A610, optionally followed by a

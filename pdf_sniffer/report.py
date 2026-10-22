@@ -1,3 +1,6 @@
+# Author:  Corey Preston
+# Company: Fischer Connectors, Inc
+# Date:    October 2026
 """CSV / Excel / text reports, plus the optional copy-into-category-folders step."""
 import csv
 import os

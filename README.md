@@ -1,5 +1,9 @@
 # PDF Sniffer
 
+**Author:** Corey Preston  
+**Company:** Fischer Connectors, Inc  
+**Date:** October 2026
+
 Scans folders of PDF drawings and documents and sorts every file by the **EAR / ITAR export-control logo**
 (a red circle containing red "ITAR" or "EAR" text, usually with an ECCN beside it) it carries.
 

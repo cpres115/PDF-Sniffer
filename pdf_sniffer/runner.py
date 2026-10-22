@@ -1,3 +1,6 @@
+# Author:  Corey Preston
+# Company: Fischer Connectors, Inc
+# Date:    October 2026
 """Walk folders, scan every PDF (in parallel) and stream results to a JSON-lines file."""
 import json
 import os

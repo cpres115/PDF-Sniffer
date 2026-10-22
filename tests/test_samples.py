@@ -1,3 +1,6 @@
+# Author:  Corey Preston
+# Company: Fischer Connectors, Inc
+# Date:    October 2026
 """End-to-end checks on the synthetic sample PDFs (the same ones `--selftest` uses)."""
 import os
 import shutil

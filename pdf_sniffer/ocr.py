@@ -1,3 +1,6 @@
+# Author:  Corey Preston
+# Company: Fischer Connectors, Inc
+# Date:    October 2026
 """Thin wrapper around PyMuPDF's built-in Tesseract OCR (English data is bundled)."""
 import contextlib
 import os

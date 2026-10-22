@@ -1,3 +1,6 @@
+# Author:  Corey Preston
+# Company: Fischer Connectors, Inc
+# Date:    October 2026
 """Pixel-level helpers: red-ink masks, connected components and circle (ring) fitting.
 
 Only numpy is used, so the whole program stays small and portable.

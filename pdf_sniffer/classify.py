@@ -1,3 +1,6 @@
+# Author:  Corey Preston
+# Company: Fischer Connectors, Inc
+# Date:    October 2026
 """Turn the logos found in a file into one of the report categories."""
 from .models import (EAR_NO_ECCN, EAR_PREFIX, ITAR, NEEDS_REVIEW, NON_CONTROLLED, STATUS_ERROR,
                      STATUS_OK, STATUS_REVIEW, UNREADABLE)

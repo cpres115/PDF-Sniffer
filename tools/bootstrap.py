@@ -1,3 +1,6 @@
+# Author:  Corey Preston
+# Company: Fischer Connectors, Inc
+# Date:    October 2026
 """First-time setup: install the bundled libraries into ./runtime (no internet, no admin rights).
 
 Run by "Run PDF Sniffer.bat" with the *bundled* Python, after it has unpacked vendor/python-*.zip

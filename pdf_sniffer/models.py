@@ -1,3 +1,6 @@
+# Author:  Corey Preston
+# Company: Fischer Connectors, Inc
+# Date:    October 2026
 """Plain data containers shared by the scanner, classifier and reports."""
 from dataclasses import asdict, dataclass, field, fields
 
