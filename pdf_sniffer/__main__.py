@@ -6,7 +6,7 @@ import sys
 import time
 from pathlib import Path
 
-from . import __version__, ocr, paths, report, runner
+from . import __version__, ocr, paths, report, revisions, runner, settings
 from .config import SCANNER_VERSION, ScanConfig
 
 
@@ -28,6 +28,28 @@ def _ask_folders():
     return [p.strip().strip('"') for p in raw.split(";") if p.strip()]
 
 
+def _revisions_only(files, skipped, folders, run_dir, name_pattern):
+    items = []
+    for _root, path in files:
+        try:
+            st = os.stat(path)
+            items.append({"path": path, "size": st.st_size, "mtime": st.st_mtime})
+        except OSError:
+            items.append({"path": path, "size": 0, "mtime": 0})
+    rows, stats = revisions.analyze(items, name_pattern)
+    report.write_revision_csv(rows, run_dir / "revision_check.csv")
+    try:
+        report.write_revision_xlsx(rows, stats, run_dir / "revision_check.xlsx", folders)
+    except Exception as exc:
+        print(f"(Excel report could not be written: {exc})")
+    text = "\n".join(["PDF SNIFFER - REVISION CHECK", "=" * 60, "Folders scanned:"] + [f"  {f}" for f in folders]
+                      + ["", f"PDF files checked: {len(files)}", ""] + report.revision_summary_lines(stats)
+                      + ["", f"Reports saved in: {run_dir}"])
+    (run_dir / "summary.txt").write_text(text + "\n", encoding="utf-8")
+    print("\n" + text)
+    return 0
+
+
 def build_parser():
     p = argparse.ArgumentParser(
         prog="pdf_sniffer",
@@ -46,6 +68,13 @@ def build_parser():
     p.add_argument("--zone", metavar="X0,Y0,X1,Y1",
                    help="search area as page fractions, y downward (default 0,0.45,1,1)")
     p.add_argument("--max-pages", type=int, default=0, help="scan at most this many pages per file")
+    p.add_argument("--revisions-only", action="store_true",
+                   help="only check file names for several revisions of the same drawing (fast; no content scan)")
+    p.add_argument("--name-pattern", metavar="REGEX",
+                   help="regular expression with groups (?P<number>..) and (?P<rev>..) for reading drawing "
+                        "number and revision from file names (overrides settings.ini)")
+    p.add_argument("--advisory-phrase", metavar="TEXT", action="append", default=[],
+                   help="extra heading of an explanatory logo table to ignore (repeatable; default: GENERAL ADVISORY)")
     p.add_argument("--selftest", action="store_true", help="verify the installation on built-in sample PDFs")
     p.add_argument("--version", action="version", version=f"PDF Sniffer {__version__}")
     return p
@@ -63,7 +92,15 @@ def main(argv=None):
         from .selftest import run_selftest
         return 0 if run_selftest() else 1
 
-    cfg = ScanConfig(use_ocr=not args.no_ocr, full_page=args.full_page, max_pages=args.max_pages)
+    user = settings.load()
+    try:
+        name_pattern = revisions.compile_pattern(args.name_pattern or user["name_pattern"])
+    except ValueError as exc:
+        print(exc)
+        return 2
+    phrases = user["advisory_phrases"] if user["advisory_phrases"] is not None else settings.DEFAULT_ADVISORY_PHRASES
+    cfg = ScanConfig(use_ocr=not args.no_ocr, full_page=args.full_page, max_pages=args.max_pages,
+                     advisory_phrases=tuple(phrases) + tuple(args.advisory_phrase))
     if args.zone:
         try:
             cfg.zone = tuple(float(v) for v in args.zone.split(","))
@@ -99,9 +136,10 @@ def main(argv=None):
         return 2
 
     if not args.resume:
-        run_dir = Path(args.out) / time.strftime("run_%Y%m%d_%H%M%S")
+        prefix = "revisions" if args.revisions_only else "run"
+        run_dir = Path(args.out) / time.strftime(f"{prefix}_%Y%m%d_%H%M%S")
     run_dir.mkdir(parents=True, exist_ok=True)
-    if not args.no_evidence:
+    if not args.no_evidence and not args.revisions_only:
         cfg.evidence_dir = str(run_dir / "evidence")
         os.makedirs(cfg.evidence_dir, exist_ok=True)
 
@@ -111,6 +149,8 @@ def main(argv=None):
     print(f"Found {len(files)} PDF file(s)" + (f" ({sum(skipped.values())} other files ignored)." if skipped else "."))
     if not files:
         return 0
+    if args.revisions_only:
+        return _revisions_only(files, skipped, folders, run_dir, name_pattern)
     if cfg.use_ocr and not ocr.available():
         print(f"WARNING: OCR is unavailable ({ocr.error()}); picture-only logos may be flagged for review.")
 
@@ -123,12 +163,14 @@ def main(argv=None):
     results = runner.run_scan(files, cfg, run_dir, workers=workers, resume=bool(args.resume))
     seconds = time.time() - t0
 
+    rev_rows, rev_stats = revisions.analyze(results, name_pattern)  # also adds drawing number / revision
     report.write_csv(results, run_dir / "classification_report.csv")
+    report.write_revision_csv(rev_rows, run_dir / "revision_check.csv")
     try:
-        report.write_xlsx(results, run_dir / "classification_report.xlsx", folders, skipped)
-    except Exception as exc:  # the CSV is already written
+        report.write_xlsx(results, run_dir / "classification_report.xlsx", folders, skipped, rev_rows, rev_stats)
+    except Exception as exc:  # the CSV files are already written
         print(f"(Excel report could not be written: {exc})")
-    text = report.summary_text(results, folders, skipped, seconds, run_dir)
+    text = report.summary_text(results, folders, skipped, seconds, run_dir, rev_stats)
     (run_dir / "summary.txt").write_text(text + "\n", encoding="utf-8")
     print("\n" + text)
     if args.copy_to:

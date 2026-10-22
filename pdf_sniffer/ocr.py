@@ -41,22 +41,34 @@ def _quiet_stderr():
         os.close(saved)
 
 
-def read(pix):
-    """OCR a Pixmap and return its text ('' when nothing is recognised or OCR is unavailable)."""
+def read_words(pix):
+    """OCR a Pixmap -> (text, words); each word is (x0, y0, x1, y1, text) in the pixmap's pixel coordinates.
+
+    Returns ('', []) when nothing is recognised or OCR is unavailable.
+    """
     if not available():
-        return ""
+        return "", []
     try:
         with _quiet_stderr():
             data = pix.pdfocr_tobytes(language="eng", tessdata=_state["dir"])
         doc = pymupdf.open("pdf", data)
         try:
-            return "\n".join(p.get_text() for p in doc)
+            page = doc[0]
+            scale = pix.width / page.rect.width
+            words = [(x0 * scale, y0 * scale, x1 * scale, y1 * scale, w)
+                     for x0, y0, x1, y1, w, *_ in page.get_text("words")]
+            return page.get_text(), words
         finally:
             doc.close()
     except Exception as exc:  # OCR must never abort a scan
         _state["dir"] = None
         _state["error"] = f"OCR failed: {exc}"
-        return ""
+        return "", []
+
+
+def read(pix):
+    """OCR a Pixmap and return its text ('' when nothing is recognised or OCR is unavailable)."""
+    return read_words(pix)[0]
 
 
 def gray_pixmap(gray):

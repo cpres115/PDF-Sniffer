@@ -6,9 +6,9 @@ import time
 from collections import Counter, OrderedDict
 from pathlib import Path
 
-from . import models
+from . import models, revisions
 
-COLUMNS = ["Category", "Status", "File Name", "Folder", "ECCN (as written)", "Logo(s) Found",
+COLUMNS = ["Category", "Status", "File Name", "Drawing Number", "Revision", "Folder", "ECCN (as written)", "Logo(s) Found",
            "Logo Pages", "Detection", "Pages", "Pages Scanned", "Size (KB)", "Last Modified",
            "Notes", "Evidence Image(s)", "Full Path"]
 
@@ -36,10 +36,12 @@ def _row(r):
     pages = sorted({h["page"] for h in hits + r["suspects"]})
     notes = list(r["notes"])
     notes += [f'p{s["page"]}: {s["detail"]}' for s in r["suspects"] if s["detail"]]
+    notes += [f"Info: {i}" for i in r.get("info", [])]
     evidence = [h["evidence"] for h in hits + r["suspects"] if h["evidence"]]
     mtime = time.strftime("%Y-%m-%d %H:%M", time.localtime(r["mtime"])) if r["mtime"] else ""
     return OrderedDict([
         ("Category", r["category"]), ("Status", r["status"]), ("File Name", p.name),
+        ("Drawing Number", r.get("drawing_number", "")), ("Revision", r.get("revision", "")),
         ("Folder", str(p.parent)), ("ECCN (as written)", ", ".join(eccns)),
         ("Logo(s) Found", ", ".join(f"{k} x{v}" for k, v in sorted(labels.items()))),
         ("Logo Pages", ", ".join(map(str, pages))), ("Detection", "; ".join(methods)),
@@ -54,7 +56,16 @@ def summarize(results):
     return sorted(Counter(r["category"] for r in results).items(), key=lambda kv: category_order(kv[0]))
 
 
-def summary_text(results, folders, skipped, seconds, run_dir):
+def revision_summary_lines(stats):
+    return ["REVISION CHECK (drawing numbers read from file names)", "-" * 60,
+            f"  Drawing numbers present in more than one revision: {stats['multi_revision']}",
+            f"  Older revisions that should probably be removed:   {stats['older']}",
+            f"  Extra copies of the same revision:                 {stats['extra_copies']}",
+            f"  Drawings whose revisions cannot be ordered:        {stats['unordered']}",
+            f"  File names with no recognisable number/revision:   {stats['unparsed']} of {stats['files']}"]
+
+
+def summary_text(results, folders, skipped, seconds, run_dir, rev_stats=None):
     lines = ["PDF SNIFFER - CLASSIFICATION SUMMARY", "=" * 60,
              "Folders scanned:"] + [f"  {f}" for f in folders]
     lines += ["", f"PDF files scanned: {len(results)}   (elapsed {seconds / 60:.1f} min)", ""]
@@ -67,6 +78,8 @@ def summary_text(results, folders, skipped, seconds, run_dir):
     if skipped:
         other = ", ".join(f"{n} x {ext}" for ext, n in skipped.most_common(8))
         lines += ["", f"Non-PDF files ignored: {sum(skipped.values())} ({other})"]
+    if rev_stats is not None:
+        lines += [""] + revision_summary_lines(rev_stats)
     lines += ["", f"Reports saved in: {run_dir}"]
     return "\n".join(lines)
 
@@ -79,7 +92,69 @@ def write_csv(results, path):
         w.writerows(rows)
 
 
-def write_xlsx(results, path, folders, skipped):
+REV_FILLS = {revisions.STATUS_NEWEST: "E2F0D9", revisions.STATUS_OLDER: "F8CBAD",
+             revisions.STATUS_COPY: "FFE699", revisions.STATUS_UNORDERED: "D9D9D9"}
+
+
+def write_revision_csv(rev_rows, path):
+    with open(path, "w", newline="", encoding="utf-8-sig") as fh:
+        w = csv.DictWriter(fh, fieldnames=revisions.REVISION_COLUMNS)
+        w.writeheader()
+        w.writerows(rev_rows)
+
+
+def _add_revision_sheet(wb, rev_rows):
+    from openpyxl.styles import Alignment, Font, PatternFill
+    from openpyxl.utils import get_column_letter
+    ws = wb.create_sheet("Revision Check")
+    ws.append(revisions.REVISION_COLUMNS)
+    for c in ws[1]:
+        c.font, c.fill = Font(bold=True, color="FFFFFF"), PatternFill("solid", fgColor="1F3864")
+    for row in rev_rows:
+        ws.append([row[k] for k in revisions.REVISION_COLUMNS])
+        ws.cell(ws.max_row, 3).fill = PatternFill("solid", fgColor=REV_FILLS[row["Status"]])
+    if not rev_rows:
+        ws.append(["No drawing number appears more than once."])
+    ws.freeze_panes = "D2"
+    ws.auto_filter.ref = ws.dimensions
+    widths = {"Drawing Number": 20, "Revision": 9, "Status": 34, "File Name": 40, "Folder": 44,
+              "Last Modified": 17, "Size (KB)": 10, "Revisions On Server": 20, "Export Control Group": 34,
+              "Notes": 44, "Name Read By": 28, "Full Path": 60}
+    for i, col in enumerate(revisions.REVISION_COLUMNS, 1):
+        ws.column_dimensions[get_column_letter(i)].width = widths[col]
+    for row in ws.iter_rows(min_row=2):
+        row[9].alignment = Alignment(wrap_text=True, vertical="top")
+
+
+def _add_revision_summary(ws, stats):
+    from openpyxl.styles import Font
+    ws.append([])
+    ws.append(["Revision check (from file names)"])
+    ws.cell(ws.max_row, 1).font = Font(bold=True)
+    for label, key in (("Drawing numbers in more than one revision", "multi_revision"),
+                       ("Older revisions that should probably be removed", "older"),
+                       ("Extra copies of the same revision", "extra_copies"),
+                       ("Drawings whose revisions cannot be ordered", "unordered"),
+                       ("File names with no recognisable number/revision", "unparsed")):
+        ws.append([label, stats[key]])
+
+
+def write_revision_xlsx(rev_rows, stats, path, folders):
+    """Workbook for --revisions-only runs (no content scan)."""
+    from openpyxl import Workbook
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Summary"
+    ws.append(["Folders scanned"])
+    for f in folders:
+        ws.append([str(f)])
+    _add_revision_summary(ws, stats)
+    ws.column_dimensions["A"].width = 60
+    _add_revision_sheet(wb, rev_rows)
+    wb.save(path)
+
+
+def write_xlsx(results, path, folders, skipped, rev_rows=None, rev_stats=None):
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Font, PatternFill
     from openpyxl.utils import get_column_letter
@@ -109,6 +184,8 @@ def write_xlsx(results, path, folders, skipped):
     ws.cell(ws.max_row, 1).font = Font(bold=True)
     for f in folders:
         ws.append([str(f)])
+    if rev_stats is not None:
+        _add_revision_summary(ws, rev_stats)
     ws.column_dimensions["A"].width = 52
     ws.column_dimensions["B"].width = 12
 
@@ -130,7 +207,8 @@ def write_xlsx(results, path, folders, skipped):
         s.auto_filter.ref = s.dimensions
         widths = {"Category": 38, "Status": 9, "File Name": 38, "Folder": 40, "ECCN (as written)": 18,
                   "Logo(s) Found": 14, "Logo Pages": 10, "Detection": 22, "Pages": 7, "Pages Scanned": 9,
-                  "Size (KB)": 10, "Last Modified": 17, "Notes": 60, "Evidence Image(s)": 30, "Full Path": 60}
+                  "Size (KB)": 10, "Last Modified": 17, "Notes": 60, "Evidence Image(s)": 30, "Full Path": 60,
+                  "Drawing Number": 20, "Revision": 9}
         for i, col in enumerate(COLUMNS, 1):
             s.column_dimensions[get_column_letter(i)].width = widths[col]
         for row in s.iter_rows(min_row=2):
@@ -138,6 +216,8 @@ def write_xlsx(results, path, folders, skipped):
 
     sheet("All Files", rows)
     sheet("Needs Attention", [r for r in rows if r["Status"] != models.STATUS_OK])
+    if rev_rows is not None:
+        _add_revision_sheet(wb, rev_rows)
     wb.save(path)
 
 

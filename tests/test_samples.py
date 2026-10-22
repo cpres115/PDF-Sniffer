@@ -5,6 +5,7 @@ import tempfile
 import unittest
 
 from pdf_sniffer import runner, selftest
+from pdf_sniffer.selftest import E_NONE
 from pdf_sniffer.config import ScanConfig
 from pdf_sniffer.scanner import scan_file
 
@@ -24,6 +25,38 @@ class SampleTests(unittest.TestCase):
             with self.subTest(name):
                 res = scan_file(os.path.join(self.tmp, "samples", name), ScanConfig())
                 self.assertEqual((res.category, res.status), (category, status), res.notes)
+
+    def test_evidence_picture_always_shows_the_eccn(self):
+        evidence_dir = os.path.join(self.tmp, "evidence")
+        os.makedirs(evidence_dir, exist_ok=True)
+        cfg = ScanConfig(evidence_dir=evidence_dir)
+        for name in ("04_document_ear_eccn_9A610x.pdf", "20_mwi_advisory_table_plus_ear_footer_5D002.pdf",
+                     "23_document_eccn_far_above_logo.pdf", "24_document_eccn_far_right_and_above.pdf",
+                     "25_drawing_scanned_eccn_far_above_logo.pdf", "07_drawing_rotated90_ear_3A001.pdf"):
+            with self.subTest(name):
+                res = scan_file(os.path.join(self.tmp, "samples", name), cfg)
+                self.assertEqual(len(res.hits), 1, res.notes)
+                hit = res.hits[0]
+                ex0, ey0, ex1, ey1 = hit["eccn_box"]
+                bx0, by0, bx1, by1 = hit["evidence_box"]
+                self.assertTrue(bx0 <= ex0 and by0 <= ey0 and ex1 <= bx1 and ey1 <= by1,
+                                f"ECCN {hit['eccn_box']} outside evidence {hit['evidence_box']}")
+                self.assertTrue(os.path.isfile(os.path.join(evidence_dir, hit["evidence"])))
+
+    def test_advisory_table_logos_are_ignored_but_reported_as_info(self):
+        mwi = os.path.join(self.tmp, "samples", "19_mwi_advisory_table_only.pdf")
+        res = scan_file(mwi, ScanConfig())
+        self.assertEqual((res.category, res.status), (E_NONE, "OK"))
+        self.assertTrue(any("2 explanatory logo(s)" in i for i in res.info), res.info)
+        # with the filter switched off the same file is (wrongly) seen as controlled - proves the filter works
+        off = scan_file(mwi, ScanConfig(advisory_phrases=()))
+        self.assertEqual(off.category, selftest.E_ITAR)
+        self.assertEqual(off.status, "REVIEW")
+
+    def test_real_footer_logo_is_still_found_on_an_advisory_page(self):
+        res = scan_file(os.path.join(self.tmp, "samples", "21_mwi_advisory_pictures_plus_itar_footer.pdf"),
+                        ScanConfig())
+        self.assertEqual([h["label"] for h in res.hits], ["ITAR"])
 
     def test_no_ocr_still_reads_text_layer_logos(self):
         res = scan_file(os.path.join(self.tmp, "samples", "04_document_ear_eccn_9A610x.pdf"),

@@ -75,6 +75,22 @@ def _drawing(width, height, title="DRAWING"):
     return doc, page
 
 
+def _advisory_table(page, top, borders=True, pictures=False):
+    """A 'GENERAL ADVISORY' table that shows what the ITAR / EAR logos look like (as in MWI files)."""
+    x0, x1, xm = 60, 552, 168
+    if borders:
+        page.draw_rect(pymupdf.Rect(x0, top, x1, top + 134), width=0.8)
+        page.draw_line((x0, top + 22), (x1, top + 22), width=0.8)
+        page.draw_line((x0, top + 78), (x1, top + 78), width=0.8)
+        page.draw_line((xm, top + 22), (xm, top + 134), width=0.8)
+    page.insert_text((x0 + 8, top + 15), "GENERAL ADVISORY", fontname="hebo", fontsize=11)
+    for word, row_top, text in (("ITAR", top + 22, "This logo marks documents controlled under the ITAR."),
+                                ("EAR", top + 78, "This logo marks documents controlled under the EAR.")):
+        cy = row_top + 28
+        (_picture_logo if pictures else draw_logo)(page, x0 + 54, cy, 18, word)
+        page.insert_text((xm + 10, cy + 3), text, fontsize=9)
+
+
 def build_samples(folder):
     """Create the sample PDFs in `folder`; return {file name: (expected category, expected status)}."""
     os.makedirs(folder, exist_ok=True)
@@ -182,6 +198,43 @@ def build_samples(folder):
     doc, page = _letter()
     draw_logo(page, 300, 750, 22, "ABCD")
     save("18_document_red_ring_other_text.pdf", doc, models.NEEDS_REVIEW, models.STATUS_REVIEW)
+
+    # --- MWI-style pages: the GENERAL ADVISORY table shows both logos but they must not count
+    doc, page = _letter("MWI-1042 Rev C - page 1")
+    page.insert_text((72, 60), "MWI-1042  Assemble connector housing", fontname="hebo", fontsize=14)
+    _advisory_table(page, 430)
+    save("19_mwi_advisory_table_only.pdf", doc, E_NONE)
+
+    doc, page = _letter("MWI-2210 Rev A - page 1")
+    _advisory_table(page, 430)
+    draw_logo(page, 306, 748, 18, "EAR")
+    page.insert_text((330, 752), "ECCN: 5D002", fontsize=10)
+    save("20_mwi_advisory_table_plus_ear_footer_5D002.pdf", doc, ear_cat("5D002"))
+
+    doc, page = _letter("MWI-3305 Rev B - page 1")
+    _advisory_table(page, 430, pictures=True)
+    draw_logo(page, 520, 748, 18, "ITAR")
+    save("21_mwi_advisory_pictures_plus_itar_footer.pdf", doc, E_ITAR)
+
+    doc, page = _letter("MWI-4410 Rev A - page 1")
+    _advisory_table(page, 430, borders=False)
+    save("22_mwi_advisory_without_table_lines.pdf", doc, E_NONE)
+
+    # --- ECCN well away from the logo (vertical / horizontal offset)
+    doc, page = _letter()
+    draw_logo(page, 306, 750, 18, "EAR")
+    page.insert_text((330, 642), "ECCN: 9A610.x", fontsize=10)
+    save("23_document_eccn_far_above_logo.pdf", doc, ear_cat("9A610"))
+
+    doc, page = _letter()
+    draw_logo(page, 120, 750, 18, "EAR")
+    page.insert_text((354, 640), "ECCN: 3A001.a", fontsize=10)
+    save("24_document_eccn_far_right_and_above.pdf", doc, ear_cat("3A001"))
+
+    doc, page = _drawing(1224, 792, "HOUSING")
+    draw_logo(page, 1224 - 140, 792 - 250, 28, "EAR")
+    page.insert_text((1224 - 330, 792 - 250 - 3 * 56), "ECCN 6A002", fontsize=12)
+    save("25_drawing_scanned_eccn_far_above_logo.pdf", _scan_copy(doc, dpi=150, quality=55), ear_cat("6A002"))
 
     return expected
 

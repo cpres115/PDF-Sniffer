@@ -27,7 +27,9 @@ class LogoHit:
     eccn_labeled: bool = False   # was the ECCN preceded by the word 'ECCN'?
     center_pt: tuple = (0.0, 0.0)  # logo centre on the displayed page, in points
     diameter_pt: float = 0.0
+    eccn_box: tuple = ()         # where the ECCN text sits on the displayed page (x0, y0, x1, y1), if known
     evidence: str = ""           # file name of the saved crop
+    evidence_box: tuple = ()     # the part of the displayed page the evidence picture shows
     detail: str = ""             # why a suspect could not be resolved
 
 
@@ -43,7 +45,8 @@ class FileResult:
     status: str = STATUS_OK
     hits: list = field(default_factory=list)      # list[LogoHit as dict]
     suspects: list = field(default_factory=list)  # list[LogoHit as dict]
-    notes: list = field(default_factory=list)
+    notes: list = field(default_factory=list)     # reasons the file needs a look (set status REVIEW)
+    info: list = field(default_factory=list)      # FYI only (e.g. explanatory logos that were ignored)
     seconds: float = 0.0
 
     def to_dict(self):
