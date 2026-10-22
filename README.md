@@ -129,16 +129,16 @@ Any folder named **`- Engineering Release`** is skipped in all cases: the folder
 and also if you give it directly (upper/lower case and extra spaces are ignored). Skipped folders are named in the summary.
 Change or extend the list with `skip = ...` in `settings.ini` or `--skip-folder NAME`.
 
-## MWI files and the GENERAL ADVISORY table
+## MWI files and the General Symbol Advisory table
 
-Pages that contain the heading **GENERAL ADVISORY** (taken from the PDF text, case and spacing ignored) carry a table
+Pages that contain the heading **General Symbol Advisory** (taken from the PDF text; case and spacing ignored) carry a table
 that shows what the ITAR and EAR logos look like. Logos inside that table are ignored, so they neither classify the
 file nor raise a flag; the real classification logo (footer) is still found and counted. The table is located from the
 heading: the table that contains it, or the one right below it. If no table lines can be detected, everything below the
 heading down to the footer band (bottom 20% of the page) is treated as the explanation, so a logo in the footer is
 never skipped. Every ignored logo is noted in the report (*Info: ... explanatory logo(s) in the advisory table were
 ignored*) and saved as an `_ignored` evidence picture, so you can confirm nothing real was skipped. Add other headings
-in `settings.ini` (`phrases = GENERAL ADVISORY; Another Heading`) or with `--advisory-phrase`. This relies on the
+in `settings.ini` (`phrases = GENERAL SYMBOL ADVISORY; Another Heading`) or with `--advisory-phrase`. This relies on the
 heading being real text; in a scanned MWI page it cannot be found.
 
 ## How it decides

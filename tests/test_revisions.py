@@ -190,11 +190,11 @@ class SettingsTests(unittest.TestCase):
 
     def test_values(self):
         path = self.write("[revisions]\nname_pattern = ^(?P<number>\\d+)%(?P<rev>[A-Z])$\nredline_words = redline; rev marked\n"
-                          "[advisory]\nphrases = GENERAL ADVISORY; Export Notice\n[folders]\nskip = - Engineering Release; Old\n")
+                          "[advisory]\nphrases = GENERAL SYMBOL ADVISORY; Export Notice\n[folders]\nskip = - Engineering Release; Old\n")
         got = settings.load(path)
         self.assertEqual(got["name_pattern"], "^(?P<number>\\d+)%(?P<rev>[A-Z])$")
         self.assertEqual(got["redline_words"], ("redline", "rev marked"))
-        self.assertEqual(got["advisory_phrases"], ("GENERAL ADVISORY", "Export Notice"))
+        self.assertEqual(got["advisory_phrases"], ("GENERAL SYMBOL ADVISORY", "Export Notice"))
         self.assertEqual(got["skip_folders"], ("- Engineering Release", "Old"))
 
     def test_empty_values_turn_things_off(self):

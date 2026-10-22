@@ -75,15 +75,15 @@ def _drawing(width, height, title="DRAWING"):
     return doc, page
 
 
-def _advisory_table(page, top, borders=True, pictures=False):
-    """A 'GENERAL ADVISORY' table that shows what the ITAR / EAR logos look like (as in MWI files)."""
+def _advisory_table(page, top, borders=True, pictures=False, title="GENERAL SYMBOL ADVISORY"):
+    """A 'General Symbol Advisory' table that shows what the ITAR / EAR logos look like (as in MWI files)."""
     x0, x1, xm = 60, 552, 168
     if borders:
         page.draw_rect(pymupdf.Rect(x0, top, x1, top + 134), width=0.8)
         page.draw_line((x0, top + 22), (x1, top + 22), width=0.8)
         page.draw_line((x0, top + 78), (x1, top + 78), width=0.8)
         page.draw_line((xm, top + 22), (xm, top + 134), width=0.8)
-    page.insert_text((x0 + 8, top + 15), "GENERAL ADVISORY", fontname="hebo", fontsize=11)
+    page.insert_text((x0 + 8, top + 15), title, fontname="hebo", fontsize=11)
     for word, row_top, text in (("ITAR", top + 22, "This logo marks documents controlled under the ITAR."),
                                 ("EAR", top + 78, "This logo marks documents controlled under the EAR.")):
         cy = row_top + 28
@@ -199,7 +199,7 @@ def build_samples(folder):
     draw_logo(page, 300, 750, 22, "ABCD")
     save("18_document_red_ring_other_text.pdf", doc, models.NEEDS_REVIEW, models.STATUS_REVIEW)
 
-    # --- MWI-style pages: the GENERAL ADVISORY table shows both logos but they must not count
+    # --- MWI-style pages: the General Symbol Advisory table shows both logos but they must not count
     doc, page = _letter("MWI-1042 Rev C - page 1")
     page.insert_text((72, 60), "MWI-1042  Assemble connector housing", fontname="hebo", fontsize=14)
     _advisory_table(page, 430)
@@ -217,7 +217,8 @@ def build_samples(folder):
     save("21_mwi_advisory_pictures_plus_itar_footer.pdf", doc, E_ITAR)
 
     doc, page = _letter("MWI-4410 Rev A - page 1")
-    _advisory_table(page, 430, borders=False)
+    bold_title = "General Symbol Advisory"  # as the real MWI files write it
+    _advisory_table(page, 430, borders=False, title=bold_title)
     save("22_mwi_advisory_without_table_lines.pdf", doc, E_NONE)
 
     # --- ECCN well away from the logo (vertical / horizontal offset)

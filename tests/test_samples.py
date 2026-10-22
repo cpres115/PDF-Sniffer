@@ -53,6 +53,23 @@ class SampleTests(unittest.TestCase):
         self.assertEqual(off.category, selftest.E_ITAR)
         self.assertEqual(off.status, "REVIEW")
 
+    def advisory_page(self, name, title_lines):
+        doc, _ = selftest._letter("MWI footer")
+        selftest._advisory_table(doc[0], 430, title="")
+        for i, line in enumerate(title_lines):
+            doc[0].insert_text((68, 439 + 9 * i), line, fontname="hebo", fontsize=8)
+        path = os.path.join(self.tmp, name)
+        doc.save(path)
+        return scan_file(path, ScanConfig())
+
+    def test_advisory_heading_may_wrap_and_must_match_in_full(self):
+        wrapped = self.advisory_page("wrapped.pdf", ["General Symbol", "Advisory"])
+        self.assertEqual((wrapped.category, wrapped.status), (E_NONE, "OK"))
+        # only the full "General Symbol Advisory" heading marks the explanatory table
+        other = self.advisory_page("other.pdf", ["GENERAL ADVISORY"])
+        self.assertNotEqual(other.category, E_NONE)
+        self.assertEqual(self.advisory_page("partial.pdf", ["Symbol Advisory"]).category, other.category)
+
     def test_real_footer_logo_is_still_found_on_an_advisory_page(self):
         res = scan_file(os.path.join(self.tmp, "samples", "21_mwi_advisory_pictures_plus_itar_footer.pdf"),
                         ScanConfig())

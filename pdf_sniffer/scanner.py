@@ -186,7 +186,7 @@ def _phrase_rects(words, phrase):
 def advisory_regions(page, cfg):
     """Areas of the page that only *explain* what the ITAR/EAR logos look like.
 
-    Found from a heading such as "GENERAL ADVISORY" (see cfg.advisory_phrases): the table that
+    Found from a heading such as "General Symbol Advisory" (see cfg.advisory_phrases): the table that
     holds or directly follows the heading.  If no table can be detected, everything below the
     heading down to the footer band counts, so a real logo in the footer is never skipped.
     """

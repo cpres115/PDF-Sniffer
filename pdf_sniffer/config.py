@@ -21,9 +21,9 @@ class ScanConfig:
     # Where to look for an ECCN: left / right / above / below the logo, in logo diameters.  The
     # evidence picture always covers this whole window plus the ECCN itself.
     eccn_window: tuple = (8.0, 8.0, 4.0, 4.0)
-    # Pages containing one of these phrases have an explanatory table (e.g. "GENERAL ADVISORY" in
+    # Pages containing one of these phrases have an explanatory table (e.g. "General Symbol Advisory" in
     # MWI files) that shows what the ITAR/EAR logos look like.  Logos inside that table are ignored.
-    advisory_phrases: tuple = ("GENERAL ADVISORY",)
+    advisory_phrases: tuple = ("GENERAL SYMBOL ADVISORY",)
     footer_fraction: float = 0.20  # bottom band checked for stray 'ITAR'/'EAR' text when no logo is found
     evidence_dir: str = ""         # where to save crops of detected logos ('' = don't)
 

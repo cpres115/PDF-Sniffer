@@ -78,7 +78,7 @@ def build_parser():
     p.add_argument("--redline-word", metavar="WORD", action="append", default=[],
                    help="extra word that marks a redline in a file name (repeatable; default: REDLINE and similar)")
     p.add_argument("--advisory-phrase", metavar="TEXT", action="append", default=[],
-                   help="extra heading of an explanatory logo table to ignore (repeatable; default: GENERAL ADVISORY)")
+                   help="extra heading of an explanatory logo table to ignore (repeatable; default: 'General Symbol Advisory')")
     p.add_argument("--selftest", action="store_true", help="verify the installation on built-in sample PDFs")
     p.add_argument("--version", action="version", version=f"PDF Sniffer {__version__}")
     return p

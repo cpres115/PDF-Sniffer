@@ -4,7 +4,7 @@ import os
 
 from . import paths
 
-DEFAULT_ADVISORY_PHRASES = ("GENERAL ADVISORY",)
+DEFAULT_ADVISORY_PHRASES = ("GENERAL SYMBOL ADVISORY",)
 DEFAULT_SKIP_FOLDERS = ("- Engineering Release",)
 SETTINGS_FILE = paths.APP_ROOT / "settings.ini"
 
