@@ -28,7 +28,7 @@ def _ask_folders():
     return [p.strip().strip('"') for p in raw.split(";") if p.strip()]
 
 
-def _revisions_only(files, skipped, folders, run_dir, name_pattern):
+def _revisions_only(files, folders, run_dir, name_pattern, redline_re, skipped_dirs):
     items = []
     for _root, path in files:
         try:
@@ -36,15 +36,15 @@ def _revisions_only(files, skipped, folders, run_dir, name_pattern):
             items.append({"path": path, "size": st.st_size, "mtime": st.st_mtime})
         except OSError:
             items.append({"path": path, "size": 0, "mtime": 0})
-    rows, stats = revisions.analyze(items, name_pattern)
-    report.write_revision_csv(rows, run_dir / "revision_check.csv")
+    rev = revisions.analyze(items, name_pattern, redline_re)
+    report.write_revision_csvs(rev, run_dir)
     try:
-        report.write_revision_xlsx(rows, stats, run_dir / "revision_check.xlsx", folders)
+        report.write_revision_xlsx(rev, run_dir / "revision_check.xlsx", folders, skipped_dirs)
     except Exception as exc:
         print(f"(Excel report could not be written: {exc})")
     text = "\n".join(["PDF SNIFFER - REVISION CHECK", "=" * 60, "Folders scanned:"] + [f"  {f}" for f in folders]
-                      + ["", f"PDF files checked: {len(files)}", ""] + report.revision_summary_lines(stats)
-                      + ["", f"Reports saved in: {run_dir}"])
+                      + ["", f"PDF files checked: {len(files)}"] + report.skipped_dir_lines(skipped_dirs) + [""]
+                      + report.revision_summary_lines(rev.stats) + ["", f"Reports saved in: {run_dir}"])
     (run_dir / "summary.txt").write_text(text + "\n", encoding="utf-8")
     print("\n" + text)
     return 0
@@ -73,6 +73,10 @@ def build_parser():
     p.add_argument("--name-pattern", metavar="REGEX",
                    help="regular expression with groups (?P<number>..) and (?P<rev>..) for reading drawing "
                         "number and revision from file names (overrides settings.ini)")
+    p.add_argument("--skip-folder", metavar="NAME", action="append", default=[],
+                   help='extra folder name to skip everywhere (repeatable; "- Engineering Release" is always skipped)')
+    p.add_argument("--redline-word", metavar="WORD", action="append", default=[],
+                   help="extra word that marks a redline in a file name (repeatable; default: REDLINE and similar)")
     p.add_argument("--advisory-phrase", metavar="TEXT", action="append", default=[],
                    help="extra heading of an explanatory logo table to ignore (repeatable; default: GENERAL ADVISORY)")
     p.add_argument("--selftest", action="store_true", help="verify the installation on built-in sample PDFs")
@@ -99,6 +103,11 @@ def main(argv=None):
         print(exc)
         return 2
     phrases = user["advisory_phrases"] if user["advisory_phrases"] is not None else settings.DEFAULT_ADVISORY_PHRASES
+    skip_folders = tuple(user["skip_folders"] if user["skip_folders"] is not None
+                         else settings.DEFAULT_SKIP_FOLDERS) + tuple(args.skip_folder)
+    redline_words = tuple(user["redline_words"] if user["redline_words"] is not None
+                          else revisions.DEFAULT_REDLINE_WORDS) + tuple(args.redline_word)
+    redline_re = revisions.compile_redline_words(redline_words)
     cfg = ScanConfig(use_ocr=not args.no_ocr, full_page=args.full_page, max_pages=args.max_pages,
                      advisory_phrases=tuple(phrases) + tuple(args.advisory_phrase))
     if args.zone:
@@ -145,12 +154,15 @@ def main(argv=None):
 
     print(f"PDF Sniffer {__version__}")
     print("Looking for PDF files ...")
-    files, skipped = runner.discover(folders, recursive=not args.no_subfolders)
+    files, skipped, skipped_dirs = runner.discover(folders, recursive=not args.no_subfolders,
+                                                   skip_folders=skip_folders)
     print(f"Found {len(files)} PDF file(s)" + (f" ({sum(skipped.values())} other files ignored)." if skipped else "."))
+    if skipped_dirs:
+        print(f"Skipped {len(skipped_dirs)} folder(s) by name ({', '.join(skip_folders)}).")
     if not files:
         return 0
     if args.revisions_only:
-        return _revisions_only(files, skipped, folders, run_dir, name_pattern)
+        return _revisions_only(files, folders, run_dir, name_pattern, redline_re, skipped_dirs)
     if cfg.use_ocr and not ocr.available():
         print(f"WARNING: OCR is unavailable ({ocr.error()}); picture-only logos may be flagged for review.")
 
@@ -163,14 +175,14 @@ def main(argv=None):
     results = runner.run_scan(files, cfg, run_dir, workers=workers, resume=bool(args.resume))
     seconds = time.time() - t0
 
-    rev_rows, rev_stats = revisions.analyze(results, name_pattern)  # also adds drawing number / revision
+    rev = revisions.analyze(results, name_pattern, redline_re)  # also adds drawing number / revision
     report.write_csv(results, run_dir / "classification_report.csv")
-    report.write_revision_csv(rev_rows, run_dir / "revision_check.csv")
+    report.write_revision_csvs(rev, run_dir)
     try:
-        report.write_xlsx(results, run_dir / "classification_report.xlsx", folders, skipped, rev_rows, rev_stats)
+        report.write_xlsx(results, run_dir / "classification_report.xlsx", folders, skipped, rev, skipped_dirs)
     except Exception as exc:  # the CSV files are already written
         print(f"(Excel report could not be written: {exc})")
-    text = report.summary_text(results, folders, skipped, seconds, run_dir, rev_stats)
+    text = report.summary_text(results, folders, skipped, seconds, run_dir, rev, skipped_dirs)
     (run_dir / "summary.txt").write_text(text + "\n", encoding="utf-8")
     print("\n" + text)
     if args.copy_to:

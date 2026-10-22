@@ -58,14 +58,27 @@ def summarize(results):
 
 def revision_summary_lines(stats):
     return ["REVISION CHECK (drawing numbers read from file names)", "-" * 60,
-            f"  Drawing numbers present in more than one revision: {stats['multi_revision']}",
-            f"  Older revisions that should probably be removed:   {stats['older']}",
-            f"  Extra copies of the same revision:                 {stats['extra_copies']}",
-            f"  Drawings whose revisions cannot be ordered:        {stats['unordered']}",
-            f"  File names with no recognisable number/revision:   {stats['unparsed']} of {stats['files']}"]
+            f"  Drawings with several revisions on the server:       {stats['multi_revision']}",
+            f"  Older revisions that should probably be removed:     {stats['older']}",
+            f"  Plain files made out of date by a REDLINE:           {stats['outdated_by_redline']}",
+            f"  Old redlines (a newer revision exists):              {stats['old_redlines']}",
+            f"  Extra copies of the same revision:                   {stats['extra_copies']}",
+            f"  Drawings whose revisions cannot be ordered:          {stats['unordered']}",
+            f"  REDLINE files on the server (see Redlines list):     {stats['redlines']}",
+            f"  File names without a revision:                       {stats['no_revision']} of {stats['files']}",
+            f"  File names with no drawing number at all:            {stats['unparsed']}"]
 
 
-def summary_text(results, folders, skipped, seconds, run_dir, rev_stats=None):
+def skipped_dir_lines(skipped_dirs, limit=10):
+    if not skipped_dirs:
+        return []
+    lines = ["", f"Folders skipped by name: {len(skipped_dirs)}"] + [f"  {d}" for d in skipped_dirs[:limit]]
+    if len(skipped_dirs) > limit:
+        lines.append(f"  ... and {len(skipped_dirs) - limit} more (full list in the Excel Summary sheet)")
+    return lines
+
+
+def summary_text(results, folders, skipped, seconds, run_dir, rev=None, skipped_dirs=()):
     lines = ["PDF SNIFFER - CLASSIFICATION SUMMARY", "=" * 60,
              "Folders scanned:"] + [f"  {f}" for f in folders]
     lines += ["", f"PDF files scanned: {len(results)}   (elapsed {seconds / 60:.1f} min)", ""]
@@ -78,8 +91,9 @@ def summary_text(results, folders, skipped, seconds, run_dir, rev_stats=None):
     if skipped:
         other = ", ".join(f"{n} x {ext}" for ext, n in skipped.most_common(8))
         lines += ["", f"Non-PDF files ignored: {sum(skipped.values())} ({other})"]
-    if rev_stats is not None:
-        lines += [""] + revision_summary_lines(rev_stats)
+    lines += skipped_dir_lines(skipped_dirs)
+    if rev is not None:
+        lines += [""] + revision_summary_lines(rev.stats)
     lines += ["", f"Reports saved in: {run_dir}"]
     return "\n".join(lines)
 
@@ -92,38 +106,57 @@ def write_csv(results, path):
         w.writerows(rows)
 
 
-REV_FILLS = {revisions.STATUS_NEWEST: "E2F0D9", revisions.STATUS_OLDER: "F8CBAD",
-             revisions.STATUS_COPY: "FFE699", revisions.STATUS_UNORDERED: "D9D9D9"}
+REV_FILLS = {revisions.STATUS_NEWEST: "E2F0D9", revisions.STATUS_REDLINE_CURRENT: "E2F0D9",
+             revisions.STATUS_OLDER: "F8CBAD", revisions.STATUS_OUTDATED: "F8CBAD",
+             revisions.STATUS_REDLINE_OLD: "F8CBAD", revisions.STATUS_COPY: "FFE699",
+             revisions.STATUS_UNORDERED: "D9D9D9"}
+SHEET_WIDTHS = {"Drawing Number": 20, "Revision": 9, "Status": 34, "File Name": 40, "Folder": 44,
+                "Last Modified": 17, "Size (KB)": 10, "Revisions On Server": 20, "Export Control Group": 34,
+                "Notes": 44, "Name Read By": 28, "Full Path": 60, "Redline File": 40, "Redline Word": 14,
+                "Plain File(s) It Makes Out Of Date": 44}
 
 
-def write_revision_csv(rev_rows, path):
+def write_rows_csv(rows, columns, path):
     with open(path, "w", newline="", encoding="utf-8-sig") as fh:
-        w = csv.DictWriter(fh, fieldnames=revisions.REVISION_COLUMNS)
+        w = csv.DictWriter(fh, fieldnames=columns)
         w.writeheader()
-        w.writerows(rev_rows)
+        w.writerows(rows)
 
 
-def _add_revision_sheet(wb, rev_rows):
+def write_revision_csvs(rev, run_dir):
+    write_rows_csv(rev.rows, revisions.REVISION_COLUMNS, Path(run_dir) / "revision_check.csv")
+    write_rows_csv(rev.redlines, revisions.REDLINE_COLUMNS, Path(run_dir) / "redlines.csv")
+
+
+def _add_table_sheet(wb, title, columns, rows, empty_text):
     from openpyxl.styles import Alignment, Font, PatternFill
     from openpyxl.utils import get_column_letter
-    ws = wb.create_sheet("Revision Check")
-    ws.append(revisions.REVISION_COLUMNS)
+    ws = wb.create_sheet(title)
+    ws.append(columns)
     for c in ws[1]:
         c.font, c.fill = Font(bold=True, color="FFFFFF"), PatternFill("solid", fgColor="1F3864")
-    for row in rev_rows:
-        ws.append([row[k] for k in revisions.REVISION_COLUMNS])
-        ws.cell(ws.max_row, 3).fill = PatternFill("solid", fgColor=REV_FILLS[row["Status"]])
-    if not rev_rows:
-        ws.append(["No drawing number appears more than once."])
+    status_col = columns.index("Status") + 1
+    for row in rows:
+        ws.append([row[k] for k in columns])
+        fill = REV_FILLS.get(row["Status"])
+        if fill:
+            ws.cell(ws.max_row, status_col).fill = PatternFill("solid", fgColor=fill)
+    if not rows:
+        ws.append([empty_text])
     ws.freeze_panes = "D2"
     ws.auto_filter.ref = ws.dimensions
-    widths = {"Drawing Number": 20, "Revision": 9, "Status": 34, "File Name": 40, "Folder": 44,
-              "Last Modified": 17, "Size (KB)": 10, "Revisions On Server": 20, "Export Control Group": 34,
-              "Notes": 44, "Name Read By": 28, "Full Path": 60}
-    for i, col in enumerate(revisions.REVISION_COLUMNS, 1):
-        ws.column_dimensions[get_column_letter(i)].width = widths[col]
-    for row in ws.iter_rows(min_row=2):
-        row[9].alignment = Alignment(wrap_text=True, vertical="top")
+    for i, col in enumerate(columns, 1):
+        ws.column_dimensions[get_column_letter(i)].width = SHEET_WIDTHS.get(col, 16)
+    if "Notes" in columns:
+        for row in ws.iter_rows(min_row=2):
+            row[columns.index("Notes")].alignment = Alignment(wrap_text=True, vertical="top")
+
+
+def _add_revision_sheets(wb, rev):
+    _add_table_sheet(wb, "Revision Check", revisions.REVISION_COLUMNS, rev.rows,
+                     "No drawing number appears more than once.")
+    _add_table_sheet(wb, "Redlines", revisions.REDLINE_COLUMNS, rev.redlines,
+                     "No REDLINE files were found.")
 
 
 def _add_revision_summary(ws, stats):
@@ -131,15 +164,29 @@ def _add_revision_summary(ws, stats):
     ws.append([])
     ws.append(["Revision check (from file names)"])
     ws.cell(ws.max_row, 1).font = Font(bold=True)
-    for label, key in (("Drawing numbers in more than one revision", "multi_revision"),
+    for label, key in (("Drawings with several revisions on the server", "multi_revision"),
                        ("Older revisions that should probably be removed", "older"),
+                       ("Plain files made out of date by a REDLINE", "outdated_by_redline"),
+                       ("Old redlines (a newer revision exists)", "old_redlines"),
                        ("Extra copies of the same revision", "extra_copies"),
                        ("Drawings whose revisions cannot be ordered", "unordered"),
-                       ("File names with no recognisable number/revision", "unparsed")):
+                       ("REDLINE files on the server (sheet: Redlines)", "redlines"),
+                       ("File names without a revision", "no_revision"),
+                       ("File names with no drawing number at all", "unparsed")):
         ws.append([label, stats[key]])
 
 
-def write_revision_xlsx(rev_rows, stats, path, folders):
+def _add_skipped_dirs(ws, skipped_dirs):
+    from openpyxl.styles import Font
+    if skipped_dirs:
+        ws.append([])
+        ws.append([f"Folders skipped by name ({len(skipped_dirs)})"])
+        ws.cell(ws.max_row, 1).font = Font(bold=True)
+        for d in skipped_dirs:
+            ws.append([str(d)])
+
+
+def write_revision_xlsx(rev, path, folders, skipped_dirs=()):
     """Workbook for --revisions-only runs (no content scan)."""
     from openpyxl import Workbook
     wb = Workbook()
@@ -148,13 +195,14 @@ def write_revision_xlsx(rev_rows, stats, path, folders):
     ws.append(["Folders scanned"])
     for f in folders:
         ws.append([str(f)])
-    _add_revision_summary(ws, stats)
+    _add_skipped_dirs(ws, skipped_dirs)
+    _add_revision_summary(ws, rev.stats)
     ws.column_dimensions["A"].width = 60
-    _add_revision_sheet(wb, rev_rows)
+    _add_revision_sheets(wb, rev)
     wb.save(path)
 
 
-def write_xlsx(results, path, folders, skipped, rev_rows=None, rev_stats=None):
+def write_xlsx(results, path, folders, skipped, rev=None, skipped_dirs=()):
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Font, PatternFill
     from openpyxl.utils import get_column_letter
@@ -184,8 +232,9 @@ def write_xlsx(results, path, folders, skipped, rev_rows=None, rev_stats=None):
     ws.cell(ws.max_row, 1).font = Font(bold=True)
     for f in folders:
         ws.append([str(f)])
-    if rev_stats is not None:
-        _add_revision_summary(ws, rev_stats)
+    _add_skipped_dirs(ws, skipped_dirs)
+    if rev is not None:
+        _add_revision_summary(ws, rev.stats)
     ws.column_dimensions["A"].width = 52
     ws.column_dimensions["B"].width = 12
 
@@ -216,8 +265,8 @@ def write_xlsx(results, path, folders, skipped, rev_rows=None, rev_stats=None):
 
     sheet("All Files", rows)
     sheet("Needs Attention", [r for r in rows if r["Status"] != models.STATUS_OK])
-    if rev_rows is not None:
-        _add_revision_sheet(wb, rev_rows)
+    if rev is not None:
+        _add_revision_sheets(wb, rev)
     wb.save(path)
 
 

@@ -1,6 +1,7 @@
 """Walk folders, scan every PDF (in parallel) and stream results to a JSON-lines file."""
 import json
 import os
+import re
 import sys
 import time
 from collections import Counter
@@ -17,26 +18,49 @@ _INFLIGHT = None
 
 
 # ------------------------------------------------------------------ discovery
-def discover(folders, recursive=True):
-    """-> (list of (root, pdf_path), Counter of skipped file extensions)."""
-    seen, files, skipped = set(), [], Counter()
+def _norm_dir(name):
+    """Folder-name comparison key: ignores case, repeated spaces and the kind of dash used."""
+    name = re.sub("[\u2010-\u2015\u2212]", "-", name)
+    return re.sub(r"\s+", " ", name.strip()).casefold()
+
+
+def discover(folders, recursive=True, skip_folders=()):
+    """Find the PDFs under `folders`.
+
+    Any folder whose name is in `skip_folders` (e.g. "- Engineering Release") is skipped together with
+    everything inside it, wherever it is - even when it is one of the folders given.
+    Returns (list of (root, pdf_path), Counter of ignored non-PDF extensions, list of skipped folder paths).
+    """
+    skip = {_norm_dir(n) for n in skip_folders if n.strip()}
+    seen, files, ignored, skipped_dirs = set(), [], Counter(), []
     for root in folders:
         root = os.path.abspath(root)
-        walker = os.walk(root) if recursive else [(root, [], os.listdir(root))]
-        for dirpath, _dirs, names in walker:
+        if _norm_dir(os.path.basename(root.rstrip("\\/"))) in skip:
+            skipped_dirs.append(root)
+            continue
+        if recursive:
+            walker = os.walk(root)
+        else:
+            walker = [(root, [], [n for n in os.listdir(root) if os.path.isfile(os.path.join(root, n))])]
+        for dirpath, dirnames, names in walker:
+            kept = []
+            for d in dirnames:
+                if _norm_dir(d) in skip:
+                    skipped_dirs.append(os.path.join(dirpath, d))
+                else:
+                    kept.append(d)
+            dirnames[:] = kept  # os.walk does not descend into the skipped folders
             for name in names:
                 full = os.path.join(dirpath, name)
-                if recursive is False and os.path.isdir(full):
-                    continue
                 if name.lower().endswith(".pdf"):
                     key = os.path.normcase(full)
                     if key not in seen and not name.startswith("~$"):
                         seen.add(key)
                         files.append((root, full))
                 else:
-                    skipped[os.path.splitext(name)[1].lower() or "(no extension)"] += 1
+                    ignored[os.path.splitext(name)[1].lower() or "(no extension)"] += 1
     files.sort(key=lambda t: os.path.normcase(t[1]))
-    return files, skipped
+    return files, ignored, sorted(set(skipped_dirs), key=os.path.normcase)
 
 
 # ---------------------------------------------------------------- worker side

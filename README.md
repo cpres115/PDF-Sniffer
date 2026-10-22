@@ -51,8 +51,8 @@ Each run creates `output\run_<date>_<time>\` inside the program folder:
 * `classification_report.xlsx` - sheet **Summary** (counts per group), **All Files** (filterable, colour-coded),
   **Needs Attention** (everything flagged `REVIEW` or `ERROR`)
 * `classification_report.csv` - the same list for other tools
-* `revision_check.csv` and the Excel sheet **Revision Check** - drawings with more than one revision on the server
-  (see below)
+* `revision_check.csv` / sheet **Revision Check** - old revisions, redlines and copies left on the server (see below)
+* `redlines.csv` / sheet **Redlines** - every REDLINE file with a count
 * `evidence\` - a picture of every logo found. It always shows the whole area searched for the ECCN (8 logo
   diameters either side, 4 above and below) plus the ECCN itself, with the logo outlined in **green** and the ECCN in
   **blue**, so the ECCN is visible wherever it sits. Pictures ending in `_ignored` show explanatory logos that were
@@ -74,39 +74,60 @@ was recognised, and notes. Files with different paragraph suffixes (`9A610.x`, `
 | `--no-ocr` | text-layer and shape detection only (faster, less able to read picture-only logos) |
 | `--no-evidence` | don't save logo pictures |
 | `--no-subfolders` | only the folders given |
-| `--revisions-only` | only run the drawing-number / revision check on the file names (takes seconds, no PDF content is read) |
+| `--revisions-only` | only run the revision / redline check on the file names (takes seconds, no PDF content is read) |
 | `--name-pattern REGEX` | how to read drawing number and revision from file names (see "Revision check") |
+| `--redline-word WORD` | one more word that marks a redline (repeatable) |
+| `--skip-folder NAME` | one more folder name to skip everywhere (repeatable; `- Engineering Release` is always skipped) |
 | `--advisory-phrase TEXT` | one more heading that marks an explanatory logo table to ignore (repeatable) |
 
 Linux / macOS: `./run_pdf_sniffer.sh <folders>` (needs Python 3.10+ and internet once to install into `runtime/`).
 
-## Revision check: old revisions left on the server
+## Revision check: old revisions and redlines left on the server
 
-Every PDF name is read as **drawing number + revision**. Files are grouped by drawing number (across all the folders
-you scan, ignoring differences in `-`, `_`, space and case) and every drawing present in more than one revision is
-listed in the **Revision Check** sheet (and `revision_check.csv`):
+Because the library is version-controlled, the **file name** matters: `<drawing number>_<revision>[-<classification>]`,
+for example `A10-000-5660_B-EAR.pdf`. Every PDF name is read into drawing number, revision and (if present) a
+REDLINE marker. Files are grouped by drawing number (across all folders you scan; case and `-`/`_`/space differences
+are ignored) and every drawing with something out of date is listed in the **Revision Check** sheet and
+`revision_check.csv`:
 
 | Status | Meaning |
 |---|---|
 | `Newest - keep` | the highest revision of that drawing |
-| `Older revision - remove?` | a lower revision still on the server |
-| `Same revision - extra copy` | the same drawing number *and* revision exists more than once |
+| `Older revision - remove?` | a lower revision of the same drawing is still on the server (`A10-000-5660_B-EAR.pdf` next to `..._C-EAR.pdf`) |
+| `Current redline - keep` | the redline of the newest revision |
+| `Out of date - a redline exists` | a plain file whose drawing has a shared redline of the same or a newer revision, or of no revision: `TST-010-600.pdf` next to `TST-010-600_A Redline.pdf`; the **Notes** column names the redline |
+| `Old redline - remove?` | a redline of a revision that has since been superseded |
+| `Same revision - extra copy` | the same drawing number and revision exists more than once (also `- Copy` / `(1)` files) |
 | `Revisions cannot be ordered - verify` | revisions mix letters and numbers (e.g. `A` and `01`), so no newest one is named |
 
-Each row also shows the folder, last-modified date, all revisions found, and (in a full run) the file's export-control
+Each row also shows the folder, last-modified date, all revisions found and (in a full run) the file's export-control
 group, so you can see at once whether a stale file is an ITAR/EAR drawing. Letter revisions order `A < B < ... < Z < AA`,
-numeric ones numerically (`9 < 10`). Nothing is deleted or changed; it only reports.
+numeric ones numerically (`9 < 10`). **Nothing is deleted or changed; it only reports.**
 
-Names understood out of the box: `12345-678 Rev B.pdf`, `12345-678_RevB.pdf`, `MWI-1042_REV_02.pdf`,
-`MWI-1042_RevC_2025-03-04.pdf` (the revision keyword wins; anything after it is ignored), `12345-678-B.pdf`,
-`12345_B.pdf`, `12345-678_02.pdf`. Windows copy markers (`... - Copy`, `... (1)`) are ignored so copies group with the
-original. A name read from a trailing letter or number is marked *"(guess)"* in the **Name Read By** column. The
-**Drawing Number** and **Revision** columns of the *All Files* sheet show how every name was read; files whose
-name could not be read are counted in the summary.
+**How a name is read**
 
-**If your naming scheme differs**, run `Run PDF Sniffer.bat --revisions-only` on a folder first (it only reads file
-names, so it takes seconds) and check the columns. To change the rule, edit `settings.ini` (a regular expression with the
-groups `number` and `rev`) or pass `--name-pattern`.
+* A REDLINE word marks a redline and cuts the name there (the word and anything after it are ignored). Built in:
+  `redline`, `red line` / `red-line`, `markup`, `mark up`, `marked up`, `redln`, `rdln`, `mkup`, `rl`, in any case, also as
+  `redlined`, `redlines`, `Redline 2`. Add your own words in `settings.ini` (`redline_words`) or with `--redline-word`.
+* A trailing `-EAR`, `-ITAR`, `-EAR99` or ECCN (`-9A610`) and Windows copy markers (`- Copy`, `(1)`) are ignored.
+* The revision is the short token after the last underscore (`_B`, `_C`, `_02`) or follows a keyword (`Rev B`, `REV_02`).
+* A name with no revision is simply the drawing number (`TST-010-600.pdf`) and counts as older than any revision.
+
+The **Drawing Number** and **Revision** columns of the *All Files* sheet show how every name was read, and the **Name Read
+By** column of the revision sheet how it was recognised. To use a different scheme, give a regular expression with the
+groups `number` and `rev` in `settings.ini` (`name_pattern`) or with `--name-pattern`.
+
+### Redline list
+
+Every file whose name contains a REDLINE word is listed - with its count - in the **Redlines** sheet and `redlines.csv`:
+drawing number, revision, folder, date, the word that matched, whether it is the current or an old redline, and the plain
+file(s) it makes out of date. The count also appears in the summary.
+
+### Folders that are skipped
+
+Any folder named **`- Engineering Release`** is skipped in all cases: the folder and everything inside it, at any depth,
+and also if you give it directly (upper/lower case and extra spaces are ignored). Skipped folders are named in the summary.
+Change or extend the list with `skip = ...` in `settings.ini` or `--skip-folder NAME`.
 
 ## MWI files and the GENERAL ADVISORY table
 
@@ -155,8 +176,9 @@ drawings. Before relying on it for compliance decisions:
 2. Open `Needs Attention` and a handful of `evidence` images from each group.
 3. If a real logo is missed or misread, send me an example (or the evidence image) and the thresholds can be tuned.
 
-Also check that file names are read correctly by the revision check (see above) and that `_ignored` evidence pictures
-only show explanatory logos.
+Also check that file names are read correctly by the revision check (see above), that every redline in your library
+appears in the Redlines list (if one is missing, add its wording to `redline_words`), and that `_ignored` evidence
+pictures only show explanatory logos.
 
 Limits to be aware of: a logo cut off by the page edge, drawn outside the lower 55% of the page (use `--full-page`),
 smaller than 0.2 in, filled solid red, or smudged beyond recognition will not be recognised (the footer-text check and
@@ -179,9 +201,9 @@ example only in the title block) is found only if it is written "ECCN ...".
 ```
 pdf_sniffer/      imaging.py (red mask, components, circle fit)   logo_reader.py (ITAR/EAR reading)
                   scanner.py (per page / per file, ECCN search, advisory tables, evidence)   eccn.py
-                  classify.py   revisions.py (drawing number / revision check)   settings.py (settings.ini)
+                  classify.py   revisions.py (drawing number / revision / redline check)   settings.py (settings.ini)
                   runner.py (parallel, resume)   report.py   selftest.py (sample PDFs)   __main__.py (CLI)
-settings.ini         optional: file-name pattern for the revision check, advisory-table headings
+settings.ini         optional: file-name pattern, redline words, skipped folders, advisory-table headings
 tools/bootstrap.py   first-run installer used by the .bat files
 vendor/              bundled Python, wheels, OCR data, SHA256SUMS.txt, LICENSES.md
 tests/               python -m unittest discover -s tests -t .

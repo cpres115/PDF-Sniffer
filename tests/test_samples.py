@@ -64,7 +64,7 @@ class SampleTests(unittest.TestCase):
         self.assertEqual(res.category, selftest.ear_cat("9A610"))
 
     def test_parallel_run_matches_serial_and_resumes(self):
-        files, skipped = runner.discover([os.path.join(self.tmp, "samples")])
+        files, skipped, _ = runner.discover([os.path.join(self.tmp, "samples")])
         self.assertEqual(len(files), len(self.expected))
         run_dir = os.path.join(self.tmp, "run")
         os.makedirs(run_dir)
@@ -91,7 +91,7 @@ class SampleTests(unittest.TestCase):
 
         runner.scan_file = crashing
         try:
-            files, _ = runner.discover([folder])
+            files, _, _ = runner.discover([folder])
             run_dir = os.path.join(self.tmp, "crashrun")
             os.makedirs(run_dir)
             results = runner.run_scan(files, ScanConfig(), run_dir, workers=3)
